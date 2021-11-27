@@ -63,3 +63,4 @@ if __name__ == "__main__":
     x = torch.randn((B, T + 3, H))
     with PytorchTimer(verbose=True):
         y = check_shape(layer(x), (B, T + 3, H))
+        

@@ -4,12 +4,13 @@ setup(
     name="flexgpt",
     version="0.1.0",
     description="Checkmate prevents you from OOMing when training big deep neural nets",
-    packages=["flexgpt"],  # find_packages()
+    packages=["minGPT"],  # find_packages()
     python_requires=">=3.8",
     install_requires=[
         "numpy",
         "pandas",
         "transformers",
+        "loguru",
     ],
     extras_require={"test": ["pytest", "tensorflow", "matplotlib", "graphviz"]},
 )
