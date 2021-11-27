@@ -31,7 +31,7 @@ class PytorchTimer(object):
 
 class CachedModule(nn.Module):
     """ cache object """
-    def __init__(self, x = None):
+    def __init__(self, x=None):
         super().__init__()
         self.cache = x
     
@@ -40,3 +40,4 @@ class CachedModule(nn.Module):
     
     def set_cache(self, x):
         self.cache = x
+        
