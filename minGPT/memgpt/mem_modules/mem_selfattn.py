@@ -46,9 +46,10 @@ class CachedSelfAttn(CachedLinear):
             k = self.cache["k"](x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
             v = self.cache["v"](x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
 
+            print(q[:, :, :, -1:].shape, k.transpose(-2, -1).shape)
             qkt = q @ k.transpose(-2, -1) 
             att = qkt * (1.0 / math.sqrt(k.size(-1)))
-            att = att.masked_fill(self.mask[:,:,:T,:T] == 0, float('-inf'))
+            att = att.masked_fill(self.mask[:, :, :T, :T] == 0, float('-inf'))
             att = F.softmax(att, dim=-1)
             y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
             y = y.transpose(1, 2).contiguous().view(B, T, H)
@@ -65,9 +66,9 @@ class CachedSelfAttn(CachedLinear):
 
             # qkt: BKT(H/K) * BKT(H/K).T -> BKTT
             print(q[:, :, :, -1:].shape, k.transpose(-2, -1).shape)
-            qkt[:, :, :, -1] = q[:, :, :, -1:] @ k.transpose(-2, -1) 
+            qkt[:, :, :, -1:] = q[:, :, :, -1:] @ k.transpose(-2, -1)
             attn = qkt * (1.0 / math.sqrt(k.size(-1)))
-            attn = attn.masked_fill(self.attn_mask[:, :, :T, :T], 1e-9)
+            attn = attn.masked_fill(self.mask[:, :, :T, :T] == 0, float('-inf'))
             attn = F.softmax(attn, dim=-1)
             new_attn = attn[:, :, -1:, -1:]
 
