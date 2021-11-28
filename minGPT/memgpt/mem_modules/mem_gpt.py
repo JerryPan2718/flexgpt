@@ -1,7 +1,9 @@
 from utils import check_shape, CachedModule, PytorchTimer
 from mem_selfattn import CachedSelfAttn
+from mem_block import MemBlock
 import torch
 import torch.nn as nn
+from torch.nn import functional as F
 from loguru import logger
 
 class MemGPT(nn.Module):

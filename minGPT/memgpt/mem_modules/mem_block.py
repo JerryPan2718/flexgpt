@@ -2,10 +2,11 @@ from utils import check_shape, CachedModule, PytorchTimer
 from mem_selfattn import CachedSelfAttn
 import torch
 import torch.nn as nn
+from torch.nn import functional as F
 from loguru import logger
 
 class MemBlock(nn.Module):
-    """ an unassuming Transformer block """
+    """ a MemTransformer block """
     def __init__(self, config):
         super().__init__()
         self.ln1 = nn.LayerNorm(config.n_embd)
@@ -21,4 +22,3 @@ class MemBlock(nn.Module):
         x = x + self.attn(self.ln1(x))
         x = x + self.mlp(self.ln2(x))
         return x
-        
