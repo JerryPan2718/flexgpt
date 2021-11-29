@@ -117,5 +117,5 @@ if __name__ == "__main__":
     layer = CachedSelfAttn(n_head=2, in_features=H, out_features=H, bias=False, q=q, k=k, v=v)
     x = torch.randn((B, T + 3, H))
     with PytorchTimer(verbose=True):
-        y = layer(x)
+        y = layer(x) 
     
