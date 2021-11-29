@@ -92,7 +92,7 @@ class MemGPT(nn.Module):
         # forward the GPT model
         token_embeddings = self.tok_emb(idx) # each index maps to a (learnable) vector
         position_embeddings = self.pos_emb[:, :t, :] # each position maps to a (learnable) vector
-        x = self.drop(token_embeddings + position_embeddings)
+        # x = self.drop(token_embeddings + position_embeddings)
         x = self.blocks(x)
         x = self.ln_f(x)
         logits = self.head(x)

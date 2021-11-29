@@ -52,15 +52,16 @@ if __name__ == "__main__":
         y = check_shape(layer(x), (B, T, H))
 
     logger.debug(f"test cache")
-    x = torch.randn((B, T + 1, H))
-    with PytorchTimer(verbose=True):
-        y = check_shape(layer(x), (B, T + 1, H))
+    for i in range(10):
+        x = torch.randn((B, T + i, H))
+        with PytorchTimer(verbose=True):
+            y = check_shape(layer(x), (B, T + i, H))
 
-    x = torch.randn((B, T + 2, H))
-    with PytorchTimer(verbose=True):
-        y = check_shape(layer(x), (B, T + 2, H))
+    # x = torch.randn((B, T + 2, H))
+    # with PytorchTimer(verbose=True):
+    #     y = check_shape(layer(x), (B, T + 2, H))
 
-    x = torch.randn((B, T + 3, H))
-    with PytorchTimer(verbose=True):
-        y = check_shape(layer(x), (B, T + 3, H))
+    # x = torch.randn((B, T + 3, H))
+    # with PytorchTimer(verbose=True):
+    #     y = check_shape(layer(x), (B, T + 3, H))
         
