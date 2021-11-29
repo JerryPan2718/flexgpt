@@ -35,15 +35,18 @@ class CachedSelfAttn(CachedLinear):
                 # self.cache[key].clear_cache()
                 # val.clear_cache()
                 self.cache[key] = None
+        print("cleared cache")
     
     def forward(self, x):
         B, T, H = x.size()
         K = self.n_head
 
+        print(self.cache["y"])
         qkt_cached = self.cache["qkt"]
         y_cached = self.cache["y"]
 
         if y_cached is None:
+            print(1)
             q = self.cache["q"](x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
             k = self.cache["k"](x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
             v = self.cache["v"](x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
@@ -67,7 +70,7 @@ class CachedSelfAttn(CachedLinear):
             qkt[:, :, :-1, :-1] = qkt_cached
 
             # qkt: BKT(H/K) * BKT(H/K).T -> BKTT
-            print(q[:, :, :, -1:].shape, k.transpose(-2, -1).shape)
+            # print(q[:, :, :, -1:].shape, k.transpose(-2, -1).shape)
             qkt[:, :, :, -1:] = q[:, :, :, -1:] @ k.transpose(-2, -1)
             attn = qkt * (1.0 / math.sqrt(k.size(-1)))
             attn = attn.masked_fill(self.mask[:, :, :T, :T] == 0, float('-inf'))
@@ -83,7 +86,7 @@ class CachedSelfAttn(CachedLinear):
             self.clear_cache()
             self.cache["qkt"] = qkt
             self.cache["y"] = y
-
+        print(self.cache["y"].shape)
         return y
 
 
@@ -99,23 +102,17 @@ if __name__ == "__main__":
     x = torch.randn((B, T, H))
     with PytorchTimer(verbose=True):
         y = check_shape(layer(x), (B, T, H))
-    layer.clear_cache()
+    # layer.clear_cache()
 
     layer = CachedSelfAttn(n_head=2, in_features=H, out_features=H, bias=False, q=q, k=k, v=v)
     x = torch.randn((B, T + 1, H))
     with PytorchTimer(verbose=True):
         y = check_shape(layer(x), (B, T + 1, H))
-    layer.clear_cache()
+    # layer.clear_cache()
 
-    layer = CachedSelfAttn(n_head=2, in_features=H, out_features=H, bias=False, q=q, k=k, v=v)
-    x = torch.randn((B, T + 2, H))
-    with PytorchTimer(verbose=True):
-        y = check_shape(layer(x), (B, T + 2, H))
-    layer.clear_cache()
-
-    logger.debug(f"test cache")
-    layer = CachedSelfAttn(n_head=2, in_features=H, out_features=H, bias=False, q=q, k=k, v=v)
-    x = torch.randn((B, T + 3, H))
-    with PytorchTimer(verbose=True):
-        y = layer(x) 
+    # logger.debug(f"test cache")
+    # layer = CachedSelfAttn(n_head=2, in_features=H, out_features=H, bias=False, q=q, k=k, v=v)
+    # x = torch.randn((B, T + 2, H))
+    # with PytorchTimer(verbose=True):
+    #     y = layer(x) 
     
