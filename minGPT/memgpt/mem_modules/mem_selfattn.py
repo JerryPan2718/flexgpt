@@ -1,118 +1,170 @@
 from utils import check_shape, CachedModule, PytorchTimer
 from mem_linear import CachedLinear
+import numpy as np
 import math
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from loguru import logger
+from tqdm import tqdm
 
 
-class CachedSelfAttn(CachedLinear):
-    """" cached self-attention """
-    def __init__(self, n_head, in_features=768, out_features=768, bias=False, q=None, k=None, v=None):
+class CachedSelfAttn(CachedModule):
+    def __init__(self, n_head, n_hidden, dropout=0.1, max_t=2048):
         """
         q: BKT(H/K)
         k: BKT(H/K)
         v: BKT(H/K)
         qkt: BKTT
         """
-        assert in_features % n_head == 0, "linear layer dimension is not divisible by n_head"
-
-        CachedLinear.__init__(self, in_features, out_features, False)
-        self.cache = {"q": q, "k": k, "v": v, "y": None, "qkt": None}
-        # self.q = q
-        # self.k = k
-        # self.v = v
-        # self.y = CachedModule(self)
-        # self.qkt = CachedModule(self)
-        self.register_buffer("mask", torch.tril(torch.ones(in_features, in_features)).view(1, 1, in_features, in_features))
+        super().__init__(dict(qkt=None, y=None))
+        assert n_hidden % n_head == 0, "linear layer dimension is not divisible by n_head"
+        self.q = CachedLinear(n_hidden, n_hidden)
+        self.k = CachedLinear(n_hidden, n_hidden)
+        self.v = CachedLinear(n_hidden, n_hidden)
+        self.attn_drop = nn.Dropout(dropout)
+        self.resid_drop = nn.Dropout(dropout)
+        self.proj = CachedLinear(n_hidden, n_hidden)
+        self.register_buffer("mask", torch.tril(torch.ones(max_t, max_t)).view(1, 1, max_t, max_t))
         self.n_head = n_head
-        
-    def clear_cache(self):
-        for key, val in self.cache.items():
-            if val is not None:
-                # print(val)
-                # self.cache[key].clear_cache()
-                # val.clear_cache()
-                self.cache[key] = None
-        print("cleared cache")
+        self.n_hidden = n_hidden
     
+    def clear_cache(self):
+        self.q.clear_cache()
+        self.k.clear_cache()
+        self.v.clear_cache()
+        self.proj.clear_cache()
+        self.cache = {}
+    
+    def set_cache(self, key, value):
+        self.cache[key] = value
+    
+    def get_cache(self, key, device=None):
+        val = self.cache.get(key, None) if self.cache else None
+        if val is not None and device is not None:
+            val = val.to(device)
+        return val
+        
+    def forward_uncached(self, x):
+        B, T, H = x.size()
+        K = self.n_head
+        
+        q = self.q(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
+        k = self.k(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
+        v = self.v(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
+
+        qkt = q @ k.transpose(-2, -1) 
+        att = qkt * (1.0 / math.sqrt(k.size(-1)))
+        mask = self.mask[:, :, :T, :T].to(x.device)
+        att = att.masked_fill(mask == 0, float('-inf'))
+        att = F.softmax(att, dim=-1)
+        y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+        return qkt, y
+    
+    def forward_cached(self, x, qkt_cached, y_cached):
+        B, T, H = x.size()
+        K = self.n_head
+        qkt_cached = check_shape(qkt_cached, (B, K, T - 1, T - 1))
+        y_cached = check_shape(y_cached, (B, K, T - 1, H // K))
+        
+        q = self.q(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
+        k = self.k(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
+        v = self.v(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
+
+        qkt = torch.zeros(B, K, T, T).to(x.device)
+        qkt[:, :, :-1, :-1] = qkt_cached
+
+        # qkt: BKT(H/K) * BKT(H/K).T -> BKTT
+        qkt[:, :, -1:, :] = q[:, :, -1:, :] @ k.transpose(-2, -1)
+        attn = qkt * (1.0 / math.sqrt(k.size(-1)))
+        mask = self.mask[:, :, :T, :T].to(x.device)
+        attn = attn.masked_fill(mask == 0, float('-inf'))
+        attn = F.softmax(attn, dim=-1)
+        new_attn = attn[:, :, -1:, :]
+
+        # y_new: BK1T * BKT(H/K) -> BK1(H/K)
+        y_new = new_attn @ v
+        # y: stack(BK1(H/K), BK(T-1)(H/K)) -> BKT(H/K)
+        y = torch.cat((y_cached, y_new), dim=-2)
+
+        return qkt, y
+
     def forward(self, x):
         B, T, H = x.size()
         K = self.n_head
+        assert H == self.n_hidden
+        assert H % K == 0
 
-        print(self.cache["y"])
-        qkt_cached = self.cache["qkt"]
-        y_cached = self.cache["y"]
+        qkt_cached = self.get_cache("qkt", device=x.device)
+        y_cached = self.get_cache("y", device=x.device)
 
-        if y_cached is None:
-            print(1)
-            q = self.cache["q"](x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
-            k = self.cache["k"](x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
-            v = self.cache["v"](x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
-
-            print(q[:, :, :, -1:].shape, k.transpose(-2, -1).shape)
-            qkt = q @ k.transpose(-2, -1) 
-            att = qkt * (1.0 / math.sqrt(k.size(-1)))
-            att = att.masked_fill(self.mask[:, :, :T, :T] == 0, float('-inf'))
-            att = F.softmax(att, dim=-1)
-            y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
-            y = y.transpose(1, 2).contiguous().view(B, T, H)
-
-            self.cache["qkt"] = qkt
-            self.cache["y"] = y
-        else:
-            q = self.cache["q"](x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
-            k = self.cache["k"](x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
-            v = self.cache["v"](x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
-
-            qkt = torch.zeros(B, K, T, T)
-            qkt[:, :, :-1, :-1] = qkt_cached
-
-            # qkt: BKT(H/K) * BKT(H/K).T -> BKTT
-            # print(q[:, :, :, -1:].shape, k.transpose(-2, -1).shape)
-            qkt[:, :, :, -1:] = q[:, :, :, -1:] @ k.transpose(-2, -1)
-            attn = qkt * (1.0 / math.sqrt(k.size(-1)))
-            attn = attn.masked_fill(self.mask[:, :, :T, :T] == 0, float('-inf'))
-            attn = F.softmax(attn, dim=-1)
-            new_attn = attn[:, :, -1:, -1:]
-
-            # y_new: BK1T * BKT(H/K) -> BK1(H/K)
-            y_new = new_attn @ v
-            # y: stack(BK1(H/K), BK(T-1)(H/K)) -> BKT(H/K)
-            y = torch.stack(y_cached, y_new, dim=2)
-
-            # Clear cache before set cache
+        if y_cached is None or qkt_cached is None:
             self.clear_cache()
-            self.cache["qkt"] = qkt
-            self.cache["y"] = y
-        print(self.cache["y"].shape)
+            qkt, y = self.forward_uncached(x)
+            self.set_cache("qkt", check_shape(qkt, (B, K, T, T)))
+            self.set_cache("y", check_shape(y, (B, K, T, H // K)))
+        else:
+            qkt, y = self.forward_cached(x, qkt_cached, y_cached)
+            self.set_cache("qkt", check_shape(qkt, (B, K, T, T)))
+            self.set_cache("y", check_shape(y, (B, K, T, H // K)))
+
+        y = y.transpose(1, 2).contiguous().view(B, T, H)
         return y
 
 
 if __name__ == "__main__":
-    B, T, H = (16, 128, 768)
+    B, K, T, H = (16, 12, 128, 768)
+    n_gen = T
+    layer = CachedSelfAttn(K, H).cuda()
+    x = torch.randn((B, T, H)).cuda()
 
+    def bench(module, x, n_gen):
+        x = x.cuda()
+        B, T, H = x.shape
+        module.clear_cache()
+        with torch.inference_mode():
+            with PytorchTimer(verbose=False) as t:
+                for i in range(1, n_gen + 1):
+                    y = check_shape(layer(x.cuda()), x.shape)
+                    y_new = torch.randn((B, 1, H)).cuda()
+                    x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
+
+        return t.elapsed
+
+    def bench_uncached(module, x, n_gen):
+        x = x.cuda()
+        B, T, H = x.shape
+        with torch.inference_mode():
+            with PytorchTimer(verbose=False) as t:
+                for i in range(1, n_gen + 1):
+                    module.clear_cache()
+                    y = check_shape(layer(x.cuda()), x.shape)
+                    y_new = torch.randn((B, 1, H)).cuda()
+                    x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
+        return t.elapsed
+
+    # warmup
+    for i in tqdm(range(4)):
+        bench_uncached(layer, x, n_gen)
+
+    # bench
+    iters = []
+    for i in tqdm(range(8)):
+        iters.append(bench_uncached(layer, x, n_gen))
     
-    q = CachedLinear(H, H, False)
-    k = CachedLinear(H, H, False)
-    v = CachedLinear(H, H, False)
+    mean = np.mean(iters)
+    stddev = np.std(iters)
+    print(f"Runtime w/o cache: {mean:.2f} +- {stddev:.2f}ms")
 
-    layer = CachedSelfAttn(n_head=2, in_features=H, out_features=H, bias=False, q=q, k=k, v=v)
-    x = torch.randn((B, T, H))
-    with PytorchTimer(verbose=True):
-        y = check_shape(layer(x), (B, T, H))
-    # layer.clear_cache()
+    # warmup
+    for i in tqdm(range(4)):
+        bench(layer, x, n_gen)
 
-    layer = CachedSelfAttn(n_head=2, in_features=H, out_features=H, bias=False, q=q, k=k, v=v)
-    x = torch.randn((B, T + 1, H))
-    with PytorchTimer(verbose=True):
-        y = check_shape(layer(x), (B, T + 1, H))
-    # layer.clear_cache()
-
-    # logger.debug(f"test cache")
-    # layer = CachedSelfAttn(n_head=2, in_features=H, out_features=H, bias=False, q=q, k=k, v=v)
-    # x = torch.randn((B, T + 2, H))
-    # with PytorchTimer(verbose=True):
-    #     y = layer(x) 
+    # bench
+    iters = []
+    for i in tqdm(range(8)):
+        iters.append(bench(layer, x, n_gen))
     
+    mean = np.mean(iters)
+    stddev = np.std(iters)
+    print(f"Runtime w/ cache: {mean:.2f} +- {stddev:.2f}ms")

@@ -5,7 +5,7 @@ from loguru import logger
 
 class CachedLinear(CachedModule):
     """ cached nn.Linear layer """
-    def __init__(self, in_features, out_features, bias, x=None, **kwargs):
+    def __init__(self, in_features, out_features, bias=True, x=None, **kwargs):
         CachedModule.__init__(self, x)
         self.layer = nn.Linear(in_features, out_features, bias, **kwargs)
 

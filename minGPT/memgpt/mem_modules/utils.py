@@ -24,9 +24,9 @@ class PytorchTimer(object):
         self.end.record()
         torch.cuda.synchronize()
         self.elapsed_secs = self.start.elapsed_time(self.end)
-        self.elapsed = self.elapsed_secs * 1000  # millisecs
+        self.elapsed = self.elapsed_secs / 1000.  # millisecs
         if self.verbose:
-            print('elapsed time: %f ms' % self.elapsed)
+            print('elapsed time: %f s' % self.elapsed)
 
 
 class CachedModule(nn.Module):
