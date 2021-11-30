@@ -128,12 +128,26 @@ if __name__ == "__main__":
                     y = check_shape(layer(x.cuda()), x.shape)
                     y_new = torch.randn((B, 1, H)).cuda()
                     x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
-
         return t.elapsed
+    
+    def bench_chrome_trace(module, x, n_gen):
+        x = x.cuda()
+        B, T, H = x.shape
+        module.clear_cache()
+        with torch.inference_mode():
+            with torch.autograd.profiler.profile() as prof:
+                for i in range(1, n_gen + 1):
+                    y = check_shape(layer(x.cuda()), x.shape)
+                    y_new = torch.randn((B, 1, H)).cuda()
+                    x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
+            print(prof.key_averages().table(sort_by="cpu_time_total"))
+            prof.export_chrome_trace("bench_cached.json")
+        return 
 
     def bench_uncached(module, x, n_gen):
         x = x.cuda()
         B, T, H = x.shape
+        module.clear_cache()
         with torch.inference_mode():
             with PytorchTimer(verbose=False) as t:
                 for i in range(1, n_gen + 1):
@@ -142,6 +156,21 @@ if __name__ == "__main__":
                     y_new = torch.randn((B, 1, H)).cuda()
                     x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
         return t.elapsed
+
+    def bench_uncached_chrome_trace(module, x, n_gen):
+        x = x.cuda()
+        B, T, H = x.shape
+        module.clear_cache()
+        with torch.inference_mode():
+            with torch.autograd.profiler.profile() as prof:
+                for i in range(1, n_gen + 1):
+                    module.clear_cache()
+                    y = check_shape(layer(x.cuda()), x.shape)
+                    y_new = torch.randn((B, 1, H)).cuda()
+                    x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
+            print(prof.key_averages().table(sort_by="cpu_time_total"))
+            prof.export_chrome_trace("bench_uncached.json")
+        return 
 
     # warmup
     for i in tqdm(range(4)):
@@ -152,9 +181,12 @@ if __name__ == "__main__":
     for i in tqdm(range(8)):
         iters.append(bench_uncached(layer, x, n_gen))
     
+    
     mean = np.mean(iters)
     stddev = np.std(iters)
     print(f"Runtime w/o cache: {mean:.2f} +- {stddev:.2f}ms")
+
+    bench_uncached_chrome_trace(layer, x, 1)
 
     # warmup
     for i in tqdm(range(4)):
@@ -164,7 +196,9 @@ if __name__ == "__main__":
     iters = []
     for i in tqdm(range(8)):
         iters.append(bench(layer, x, n_gen))
-    
+
     mean = np.mean(iters)
     stddev = np.std(iters)
     print(f"Runtime w/ cache: {mean:.2f} +- {stddev:.2f}ms")
+
+    bench_chrome_trace(layer, x, 1)
