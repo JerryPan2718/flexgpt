@@ -121,7 +121,7 @@ if __name__ == "__main__":
     x = torch.randn((B, T, H)).cuda()
 
     def bench(module, x, n_gen):
-        # x = x.cuda()
+        x = x.cuda()
         B, T, H = x.shape
         module.clear_cache()
         with torch.inference_mode():
@@ -129,19 +129,19 @@ if __name__ == "__main__":
                 for i in range(1, n_gen + 1):
                     y = check_shape(layer(x.cuda()), x.shape)
                     y_new = torch.randn((B, 1, H)).cuda()
-                    x = check_shape(torch.cat((y, y_new), dim=-2), (B, T + i, H))
+                    x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
         return t.elapsed
     
     def bench_chrome_trace(module, x, n_gen):
-        # x = x.cuda()
+        x = x.cuda()
         B, T, H = x.shape
         module.clear_cache()
         with torch.inference_mode():
-            with torch.autograd.profiler.profile() as prof:
+            with torch.autograd.profiler.profile(use_cuda=True) as prof:
                 for i in range(1, n_gen + 1):
                     y = check_shape(layer(x.cuda()), x.shape)
                     y_new = torch.randn((B, 1, H)).cuda()
-                    x = check_shape(torch.cat((y, y_new), dim=-2), (B, T + i, H))
+                    x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
             print(prof.key_averages().table(sort_by="cpu_time_total"))
             prof.export_chrome_trace("bench_cached.json")
         return 
@@ -164,7 +164,7 @@ if __name__ == "__main__":
         B, T, H = x.shape
         module.clear_cache()
         with torch.inference_mode():
-            with torch.autograd.profiler.profile() as prof:
+            with torch.autograd.profiler.profile(use_cuda=True) as prof:
                 for i in range(1, n_gen + 1):
                     module.clear_cache()
                     y = check_shape(layer(x.cuda()), x.shape)
