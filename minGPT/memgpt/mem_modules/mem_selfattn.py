@@ -67,9 +67,9 @@ class CachedSelfAttn(CachedModule):
         qkt_cached = check_shape(qkt_cached, (B, K, T - 1, T - 1))
         y_cached = check_shape(y_cached, (B, K, T - 1, H // K))
         
-        q = self.q(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
-        k = self.k(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
-        v = self.v(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
+        q = self.q(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2).to(x.device)
+        k = self.k(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2).to(x.device)
+        v = self.v(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2).to(x.device)
 
         qkt = torch.zeros(B, K, T, T).to(x.device)
         qkt[:, :, :-1, :-1] = qkt_cached
@@ -77,6 +77,7 @@ class CachedSelfAttn(CachedModule):
         # qkt: BKT(H/K) * BKT(H/K).T -> BKTT
         qkt[:, :, -1:, :] = q[:, :, -1:, :] @ k.transpose(-2, -1)
         attn = qkt * (1.0 / math.sqrt(k.size(-1)))
+        attn = attn.to(x.device)
         mask = self.mask[:, :, :T, :T].to(x.device)
         attn = attn.masked_fill(mask == 0, float('-inf'))
         attn = F.softmax(attn, dim=-1)
@@ -186,7 +187,7 @@ if __name__ == "__main__":
     stddev = np.std(iters)
     print(f"Runtime w/o cache: {mean:.2f} +- {stddev:.2f}ms")
 
-    bench_uncached_chrome_trace(layer, x, 1)
+    bench_uncached_chrome_trace(layer, x, n_gen)
 
     # warmup
     for i in tqdm(range(4)):
@@ -201,4 +202,4 @@ if __name__ == "__main__":
     stddev = np.std(iters)
     print(f"Runtime w/ cache: {mean:.2f} +- {stddev:.2f}ms")
 
-    bench_chrome_trace(layer, x, 1)
+    bench_chrome_trace(layer, x, n_gen)
