@@ -188,7 +188,7 @@ if __name__ == "__main__":
     stddev = np.std(iters)
     print(f"Runtime w/o cache: {mean:.2f} +- {stddev:.2f}ms")
 
-    bench_uncached_chrome_trace(layer, x, 1)
+    bench_uncached_chrome_trace(layer, x, 2)
 
     # warmup
     for i in tqdm(range(4)):
@@ -203,4 +203,4 @@ if __name__ == "__main__":
     stddev = np.std(iters)
     print(f"Runtime w/ cache: {mean:.2f} +- {stddev:.2f}ms")
 
-    bench_chrome_trace(layer, x, 1)
+    bench_chrome_trace(layer, x, 2)
