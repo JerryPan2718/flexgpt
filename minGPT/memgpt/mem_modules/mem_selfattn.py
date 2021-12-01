@@ -7,6 +7,10 @@ import torch.nn as nn
 from torch.nn import functional as F
 from loguru import logger
 from tqdm import tqdm
+import torch.cuda.profiler as profiler
+# import pyprof
+# pyprof.init()
+
 
 
 class CachedSelfAttn(CachedModule):
@@ -78,7 +82,7 @@ class CachedSelfAttn(CachedModule):
         # qkt: BKT(H/K) * BKT(H/K).T -> BKTT
         qkt[:, :, -1:, :] = q[:, :, -1:, :] @ k.transpose(-2, -1)
         attn = qkt * (1.0 / math.sqrt(k.size(-1)))
-        # attn = attn.to(x.device)
+        attn = attn.to(x.device)
         mask = self.mask[:, :, :T, :T].to(x.device)
         attn = attn.masked_fill(mask == 0, float('-inf'))
         attn = F.softmax(attn, dim=-1)
@@ -137,13 +141,15 @@ if __name__ == "__main__":
         B, T, H = x.shape
         module.clear_cache()
         with torch.inference_mode():
-            with torch.autograd.profiler.profile(use_cuda=True) as prof:
-                for i in range(1, n_gen + 1):
-                    y = check_shape(layer(x.cuda()), x.shape)
-                    y_new = torch.randn((B, 1, H)).cuda()
-                    x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
-            print(prof.key_averages().table(sort_by="cpu_time_total"))
-            prof.export_chrome_trace("bench_cached.json")
+            with torch.cuda.profiler.profile():
+                with torch.autograd.profiler.emit_nvtx() as prof_cached:
+                    for i in range(1, n_gen + 1):
+                        y = check_shape(layer(x.cuda()), x.shape)
+                        y_new = torch.randn((B, 1, H)).cuda()
+                        x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
+                print(prof_cached)
+            # print(prof.key_averages().table(sort_by="cuda_time_total"))
+            # prof.export_chrome_trace("bench_cached.json")
         return 
 
     def bench_uncached(module, x, n_gen):
@@ -159,48 +165,54 @@ if __name__ == "__main__":
                     x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
         return t.elapsed
 
-    def bench_uncached_chrome_trace(module, x, n_gen):
+    def bench_uncached_chrome_trace(module, x, n_gen, do_profile=False):
         x = x.cuda()
         B, T, H = x.shape
         module.clear_cache()
-        with torch.inference_mode():
-            with torch.autograd.profiler.profile(use_cuda=True) as prof:
+
+        if do_profile:
+            n_gen = 1
+
+        with torch.autograd.profiler.profile(enabled=do_profile, use_cuda=True, record_shapes=True) as prof:
+            with torch.no_grad():
                 for i in range(1, n_gen + 1):
                     module.clear_cache()
                     y = check_shape(layer(x.cuda()), x.shape)
                     y_new = torch.randn((B, 1, H)).cuda()
                     x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
-            print(prof.key_averages().table(sort_by="cpu_time_total"))
+        if prof is not None:
             prof.export_chrome_trace("bench_uncached.json")
         return 
 
     # warmup
     for i in tqdm(range(4)):
-        bench_uncached(layer, x, n_gen)
+        bench_uncached_chrome_trace(layer, x, n_gen)
 
-    # bench
-    iters = []
-    for i in tqdm(range(8)):
-        iters.append(bench_uncached(layer, x, n_gen))
+    bench_uncached_chrome_trace(layer, x, n_gen, do_profile=True)
+
+    # # bench
+    # iters = []
+    # for i in tqdm(range(8)):
+    #     iters.append(bench_uncached(layer, x, n_gen))
     
     
-    mean = np.mean(iters)
-    stddev = np.std(iters)
-    print(f"Runtime w/o cache: {mean:.2f} +- {stddev:.2f}ms")
+    # mean = np.mean(iters)
+    # stddev = np.std(iters)
+    # print(f"Runtime w/o cache: {mean:.2f} +- {stddev:.2f}ms")
 
-    bench_uncached_chrome_trace(layer, x, 2)
+    # bench_uncached_chrome_trace(layer, x, 2)
 
-    # warmup
-    for i in tqdm(range(4)):
-        bench(layer, x, n_gen)
+    # # warmup
+    # for i in tqdm(range(4)):
+    #     bench(layer, x, n_gen)
 
-    # bench
-    iters = []
-    for i in tqdm(range(8)):
-        iters.append(bench(layer, x, n_gen))
+    # # bench
+    # iters = []
+    # for i in tqdm(range(8)):
+    #     iters.append(bench(layer, x, n_gen))
 
-    mean = np.mean(iters)
-    stddev = np.std(iters)
-    print(f"Runtime w/ cache: {mean:.2f} +- {stddev:.2f}ms")
+    # mean = np.mean(iters)
+    # stddev = np.std(iters)
+    # print(f"Runtime w/ cache: {mean:.2f} +- {stddev:.2f}ms")
 
-    bench_chrome_trace(layer, x, 2)
+    # bench_chrome_trace(layer, x, 2)
