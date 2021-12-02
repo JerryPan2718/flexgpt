@@ -157,13 +157,28 @@ if __name__ == "__main__":
         B, T, H = x.shape
         module.clear_cache()
         with torch.inference_mode():
-            with PytorchTimer(verbose=False) as t:
+            with torch.profiler.profile(
+                schedule=torch.profiler.schedule(
+                    wait=2,
+                    warmup=2,
+                    active=6,
+                    repeat=1),
+                # on_trace_ready=trace_handler,
+                on_trace_ready=torch.profiler.tensorboard_trace_handler(dir_name="profiler"),
+                with_stack=True,
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ],
+            ) as prof:
                 for i in range(1, n_gen + 1):
                     module.clear_cache()
                     y = check_shape(layer(x.cuda()), x.shape)
                     y_new = torch.randn((B, 1, H)).cuda()
                     x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
-        return t.elapsed
+            print(prof)
+        return 
+        # return t.elapsed
 
     def bench_uncached_chrome_trace(module, x, n_gen, do_profile=False):
         x = x.cuda()
@@ -173,15 +188,31 @@ if __name__ == "__main__":
         if do_profile:
             n_gen = 1
 
-        with torch.autograd.profiler.profile(enabled=do_profile, use_cuda=True, record_shapes=True) as prof:
+        with torch.profiler.profile(
+            schedule=torch.profiler.schedule(
+                wait=2,
+                warmup=2,
+                active=6,
+                repeat=1),
+            # on_trace_ready=trace_handler,
+            on_trace_ready=torch.profiler.tensorboard_trace_handler(dir_name="./logs"),
+            record_shapes=True,
+            with_stack=True,
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+        ) as prof:
             with torch.no_grad():
                 for i in range(1, n_gen + 1):
                     module.clear_cache()
                     y = check_shape(layer(x.cuda()), x.shape)
                     y_new = torch.randn((B, 1, H)).cuda()
                     x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
-        if prof is not None:
-            prof.export_chrome_trace("bench_uncached.json")
+        print(prof)
+        # if prof is not None:
+        #     prof.export_chrome_trace("bench_uncached.json")
+
         return 
 
     # warmup
