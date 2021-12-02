@@ -1,7 +1,9 @@
 from utils import check_shape, CachedModule, PytorchTimer
 import torch
 import torch.nn as nn
-from loguru import logger
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
 
 class CachedLinear(CachedModule):
     """ cached nn.Linear layer """
@@ -51,8 +53,8 @@ if __name__ == "__main__":
     with PytorchTimer(verbose=True):
         y = check_shape(layer(x), (B, T, H))
 
-    logger.debug(f"test cache")
-    for i in range(10):
+    logging.debug(f"test cache")
+    for i in range(1, 10):
         x = torch.randn((B, T + i, H))
         with PytorchTimer(verbose=True):
             y = check_shape(layer(x), (B, T + i, H))
