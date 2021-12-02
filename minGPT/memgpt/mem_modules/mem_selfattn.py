@@ -11,10 +11,6 @@ import torch.cuda.profiler as profiler
 import logging
 logging.basicConfig(level=logging.DEBUG)
 
-forward_inside_uncached = []
-forward_inside_cached = []
-forward_case_inside_uncached = []
-forward_case_inside_cached = []
 
 class CachedSelfAttn(CachedModule):
     def __init__(self, n_head, n_hidden, dropout=0.1, max_t=2048):
@@ -60,7 +56,6 @@ class CachedSelfAttn(CachedModule):
         k = self.k(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
         v = self.v(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
 
-        start = time.time()
         qkt = q @ k.transpose(-2, -1) 
         att = qkt * (1.0 / math.sqrt(k.size(-1)))
         # attn = attn.to(x.device)
@@ -68,8 +63,7 @@ class CachedSelfAttn(CachedModule):
         att = att.masked_fill(mask == 0, float('-inf'))
         att = F.softmax(att, dim=-1)
         y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
-        end = time.time()
-        forward_case_inside_uncached.append(end - start)
+
         return qkt, y
     
     def forward_cached(self, x, qkt_cached, y_cached):
@@ -85,7 +79,7 @@ class CachedSelfAttn(CachedModule):
 
         qkt = torch.zeros(B, K, T, T, device=x.device)
         qkt[:, :, :-1, :-1] = qkt_cached
-        start = time.time()
+
         # qkt: BKT(H/K) * BKT(H/K).T -> BKTT
         qkt[:, :, -1:, :] = q[:, :, -1:, :] @ k.transpose(-2, -1)
         attn = qkt * (1.0 / math.sqrt(k.size(-1)))
@@ -99,8 +93,7 @@ class CachedSelfAttn(CachedModule):
         y_new = new_attn @ v
         # y: stack(BK1(H/K), BK(T-1)(H/K)) -> BKT(H/K)
         y = torch.cat((y_cached, y_new), dim=-2)
-        end = time.time()
-        forward_case_inside_cached.append(end - start)
+        
         return qkt, y
 
     def forward(self, x):
@@ -114,19 +107,13 @@ class CachedSelfAttn(CachedModule):
 
         if y_cached is None or qkt_cached is None:
             self.clear_cache()
-            start1_uncached = time.time()
             qkt, y = self.forward_uncached(x)
-            end1_uncached = time.time()
             self.set_cache("qkt", check_shape(qkt, (B, K, T, T)))
             self.set_cache("y", check_shape(y, (B, K, T, H // K)))
-            forward_inside_uncached.append(end1_uncached - start1_uncached)
         else:
-            start1_cached = time.time()
             qkt, y = self.forward_cached(x, qkt_cached, y_cached)
-            end1_cached = time.time()
             self.set_cache("qkt", check_shape(qkt, (B, K, T, T)))
             self.set_cache("y", check_shape(y, (B, K, T, H // K)))
-            forward_inside_cached.append(end1_cached - start1_cached)
         y = y.transpose(1, 2).contiguous().view(B, T, H)
         return y
 
@@ -141,21 +128,13 @@ if __name__ == "__main__":
         x = x.cuda()
         B, T, H = x.shape
         module.clear_cache()
-        time1 = []
-        time2 = []
         with torch.inference_mode():
             with PytorchTimer(verbose=False) as t:
                 for i in range(1, n_gen + 1):
-                    start1 = time.time()
                     y = check_shape(layer(x.cuda()), x.shape)
-                    end1 = time.time()
-                    start2 = time.time()
                     y_new = torch.randn((B, 1, H)).cuda()
                     x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
-                    end2 = time.time()
-                    time1.append(end1 - start1)
-                    time2.append(end2 - start2)
-        return t.elapsed, np.sum(time1), np.sum(time2)
+        return t.elapsed
     
     def bench_chrome_trace(module, x, n_gen):
         x = x.cuda()
@@ -176,22 +155,14 @@ if __name__ == "__main__":
         x = x.cuda()
         B, T, H = x.shape
         module.clear_cache()
-        time1 = []
-        time2 = []
         with torch.inference_mode():
             with PytorchTimer(verbose=False) as t:
                 for i in range(1, n_gen + 1):
                     module.clear_cache()
-                    start1 = time.time()
                     y = check_shape(layer(x.cuda()), x.shape)
-                    end1 = time.time()
-                    start2 = time.time()
                     y_new = torch.randn((B, 1, H)).cuda()
                     x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
-                    end2 = time.time()
-                    time1.append(end1 - start1)
-                    time2.append(end2 - start2)
-        return t.elapsed, np.sum(time1), np.sum(time2)
+        return t.elapsed
 
     def bench_uncached_chrome_trace(module, x, n_gen, do_profile=False):
         x = x.cuda()
@@ -219,23 +190,13 @@ if __name__ == "__main__":
         
     # bench
     total_time = []
-    time1 = []
-    time2 = []
+
     for i in tqdm(range(8)):
-        iter = bench_uncached(layer, x, n_gen)
-        total_time.append(iter[0])
-        time1.append(iter[1])
-        time2.append(iter[2])
-    
+        total_time.append(bench_uncached(layer, x, n_gen))    
     
     mean = np.mean(total_time)
     stddev = np.std(total_time)
     print(f"Runtime w/o cache: {mean:.2f} +- {stddev:.2f}ms")
-    # print(f"forward uncached: {np.mean(time1):.4f} +- {np.std(time1):.4f} ms")
-    # print(f"cat uncached: {np.mean(time2):.4f} +- {np.std(time2):.4f} ms")
-    # print(f"forward_inside uncached: {np.mean(forward_inside_uncached):.4f} +- {np.std(forward_inside_uncached):.4f} ms")
-    # print(f"forward_case_inside uncached: {np.mean(forward_case_inside_uncached):.4f} +- {np.std(forward_case_inside_uncached):.4f} ms")
-    
 
     bench_uncached_chrome_trace(layer, x, 2)
 
@@ -245,19 +206,11 @@ if __name__ == "__main__":
 
     # bench
     total_time = []
-    time1 = []
-    time2 = []
     for i in tqdm(range(8)):
-        iter = bench(layer, x, n_gen)
-        total_time.append(iter[0])
-        time1.append(iter[1])
-        time2.append(iter[2])
+        total_time.append(bench(layer, x, n_gen))
 
     mean = np.mean(total_time)
     stddev = np.std(total_time)
     print(f"Runtime w/ cache: {mean:.2f} +- {stddev:.2f}ms")
-    # print(f"forward cached: {np.mean(time1):.4f} +- {np.std(time1):.4f} ms")
-    # print(f"cat cached: {np.mean(time2):.4f} +- {np.std(time2):.4f} ms")
-    # print(f"forward_inside cached: {np.mean(forward_inside_cached):.4f} +- {np.std(forward_inside_cached):.4f} ms")
-    # print(f"forward_case_inside cached: {np.mean(forward_case_inside_cached):.4f} +- {np.std(forward_case_inside_cached):.4f} ms")
+    
     bench_chrome_trace(layer, x, 2)
