@@ -5,9 +5,10 @@ import math
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from loguru import logger
+# from loguru import logger
 from tqdm import tqdm
-import torch.cuda.profiler as profiler
+import time
+# import torch.cuda.profiler as profiler
 
 
 
@@ -119,127 +120,99 @@ class CachedSelfAttn(CachedModule):
 if __name__ == "__main__":
     B, K, T, H = (16, 12, 128, 768)
     n_gen = T
-    layer = CachedSelfAttn(K, H).cuda()
-    x = torch.randn((B, T, H)).cuda()
+    layer = CachedSelfAttn(K, H)
+    x = torch.randn((B, T, H))
 
     def bench(module, x, n_gen):
-        x = x.cuda()
+        # x = x.cuda()
         B, T, H = x.shape
         module.clear_cache()
         with torch.inference_mode():
-            with PytorchTimer(verbose=False) as t:
-                for i in range(1, n_gen + 1):
-                    y = check_shape(layer(x.cuda()), x.shape)
-                    y_new = torch.randn((B, 1, H)).cuda()
-                    x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
-        return t.elapsed
+            # with PytorchTimer(verbose=False) as t:
+            start = time.time()
+            for i in range(1, n_gen + 1):
+                y = check_shape(layer(x), x.shape)
+                y_new = torch.randn((B, 1, H))
+                x = check_shape(torch.cat((y, y_new), dim=-2), (B, T + i, H))
+            end = time.time()
+        return end - start
     
     def bench_chrome_trace(module, x, n_gen):
-        x = x.cuda()
+        # x = x.cuda()
         B, T, H = x.shape
         module.clear_cache()
         with torch.inference_mode():
-            with torch.cuda.profiler.profile():
-                with torch.autograd.profiler.emit_nvtx() as prof_cached:
+            with torch.autograd.profiler.profile() as prof:
+                with torch.no_grad():
                     for i in range(1, n_gen + 1):
-                        y = check_shape(layer(x.cuda()), x.shape)
-                        y_new = torch.randn((B, 1, H)).cuda()
-                        x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
-                print(prof_cached)
-            # print(prof.key_averages().table(sort_by="cuda_time_total"))
-            # prof.export_chrome_trace("bench_cached.json")
+                        y = check_shape(layer(x), x.shape)
+                        y_new = torch.randn((B, 1, H))
+                        x = check_shape(torch.cat((y, y_new), dim=-2), (B, T + i, H))
+            print(prof.key_averages().table(sort_by="cpu_time_total"))
+            prof.export_chrome_trace("bench_cached.json")
         return 
 
     def bench_uncached(module, x, n_gen):
-        x = x.cuda()
+        # x = x.cuda()
         B, T, H = x.shape
         module.clear_cache()
         with torch.inference_mode():
-            with torch.profiler.profile(
-                schedule=torch.profiler.schedule(
-                    wait=2,
-                    warmup=2,
-                    active=6,
-                    repeat=1),
-                # on_trace_ready=trace_handler,
-                on_trace_ready=torch.profiler.tensorboard_trace_handler(dir_name="profiler"),
-                with_stack=True,
-                activities=[
-                    torch.profiler.ProfilerActivity.CPU,
-                    torch.profiler.ProfilerActivity.CUDA,
-                ],
-            ) as prof:
-                for i in range(1, n_gen + 1):
-                    module.clear_cache()
-                    y = check_shape(layer(x.cuda()), x.shape)
-                    y_new = torch.randn((B, 1, H)).cuda()
-                    x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
-            print(prof)
-        return 
-        # return t.elapsed
+            # with PytorchTimer(verbose=False) as t:
+            start = time.time()
+            for i in range(1, n_gen + 1):
+                module.clear_cache()
+                y = check_shape(layer(x), x.shape)
+                y_new = torch.randn((B, 1, H))
+                x = check_shape(torch.cat((y, y_new), dim=-2), (B, T + i, H))
+            end = time.time()
+        return end - start
 
     def bench_uncached_chrome_trace(module, x, n_gen, do_profile=False):
-        x = x.cuda()
+        # x = x.cuda()
         B, T, H = x.shape
         module.clear_cache()
 
         if do_profile:
             n_gen = 1
-
-        with torch.profiler.profile(
-            schedule=torch.profiler.schedule(
-                wait=2,
-                warmup=2,
-                active=6,
-                repeat=1),
-            # on_trace_ready=trace_handler,
-            on_trace_ready=torch.profiler.tensorboard_trace_handler(dir_name="./logs"),
-            record_shapes=True,
-            with_stack=True,
-            activities=[
-                torch.profiler.ProfilerActivity.CPU,
-                torch.profiler.ProfilerActivity.CUDA,
-            ],
-        ) as prof:
-            with torch.no_grad():
-                for i in range(1, n_gen + 1):
-                    module.clear_cache()
-                    y = check_shape(layer(x.cuda()), x.shape)
-                    y_new = torch.randn((B, 1, H)).cuda()
-                    x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
-        print(prof)
-        # if prof is not None:
-        #     prof.export_chrome_trace("bench_uncached.json")
-
+        with torch.inference_mode():
+            with torch.autograd.profiler.profile() as prof:
+                with torch.no_grad():
+                    for i in range(1, n_gen + 1):
+                        module.clear_cache()
+                        y = check_shape(layer(x), x.shape)
+                        y_new = torch.randn((B, 1, H))
+                        x = check_shape(torch.cat((y, y_new), dim=-2), (B, T + i, H))
+            print(prof.key_averages().table(sort_by="cpu_time_total"))
+            prof.export_chrome_trace("bench_uncached.json")
         return 
 
     # warmup
     for i in tqdm(range(4)):
         bench_uncached(layer, x, n_gen)
 
-    # # bench
-    # iters = []
-    # for i in tqdm(range(8)):
-    #     iters.append(bench_uncached(layer, x, n_gen))
+    # bench
+    iters = []
+    for i in tqdm(range(8)):
+        iters.append(bench_uncached(layer, x, n_gen))
     
     
-    # mean = np.mean(iters)
-    # stddev = np.std(iters)
-    # print(f"Runtime w/o cache: {mean:.2f} +- {stddev:.2f}ms")
+    mean = np.mean(iters)
+    stddev = np.std(iters)
+    print(f"Runtime w/o cache: {mean:.2f} +- {stddev:.2f}ms")
 
-    # bench_uncached_chrome_trace(layer, x, 2)
+    bench_uncached_chrome_trace(layer, x, 2)
 
-    # # warmup
-    # for i in tqdm(range(4)):
-    #     bench(layer, x, n_gen)
+    # warmup
+    for i in tqdm(range(4)):
+        bench(layer, x, n_gen)
 
-    # # bench
-    # iters = []
-    # for i in tqdm(range(8)):
-    #     iters.append(bench(layer, x, n_gen))
+    # bench
+    iters = []
+    for i in tqdm(range(8)):
+        iters.append(bench(layer, x, n_gen))
 
-    # mean = np.mean(iters)
-    # stddev = np.std(iters)
-    # print(f"Runtime w/ cache: {mean:.2f} +- {stddev:.2f}ms")
+    mean = np.mean(iters)
+    stddev = np.std(iters)
+    print(f"Runtime w/ cache: {mean:.2f} +- {stddev:.2f}ms")
 
-    # bench_chrome_trace(layer, x, 2)
+    bench_chrome_trace(layer, x, 2)
