@@ -26,7 +26,7 @@ with torch.profiler.profile(
     B = torch.randn(5, 6).cuda()
     C = A @ B
 if prof is not None:
-    print(prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
+    # print(prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
 else:
     print(f"Prof is None")
 print(prof) 
