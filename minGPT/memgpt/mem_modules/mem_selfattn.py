@@ -1,5 +1,6 @@
 from utils import check_shape, CachedModule, PytorchTimer
 from mem_linear import CachedLinear
+import time
 import numpy as np
 import math
 import torch
@@ -126,13 +127,21 @@ if __name__ == "__main__":
         x = x.cuda()
         B, T, H = x.shape
         module.clear_cache()
+        time1 = []
+        time2 = []
         with torch.inference_mode():
             with PytorchTimer(verbose=False) as t:
                 for i in range(1, n_gen + 1):
+                    start1 = time.time()
                     y = check_shape(layer(x.cuda()), x.shape)
+                    end1 = time.time()
+                    start2 = time.time()
                     y_new = torch.randn((B, 1, H)).cuda()
                     x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
-        return t.elapsed
+                    end2 = time.time()
+                    time1.append(end1 - start1)
+                    time2.append(end2 - start2)
+        return t.elapsed, np.sum(time1), np.sum(time2)
     
     def bench_chrome_trace(module, x, n_gen):
         x = x.cuda()
@@ -145,7 +154,7 @@ if __name__ == "__main__":
                         y = check_shape(layer(x.cuda()), x.shape)
                         y_new = torch.randn((B, 1, H)).cuda()
                         x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
-            print(prof.key_averages().table(sort_by="cpu_time_total"))
+            # print(prof.key_averages().table(sort_by="cpu_time_total"))
             prof.export_chrome_trace("bench_cached.json")
         return 
 
@@ -153,14 +162,22 @@ if __name__ == "__main__":
         x = x.cuda()
         B, T, H = x.shape
         module.clear_cache()
+        time1 = []
+        time2 = []
         with torch.inference_mode():
             with PytorchTimer(verbose=False) as t:
                 for i in range(1, n_gen + 1):
                     module.clear_cache()
+                    start1 = time.time()
                     y = check_shape(layer(x.cuda()), x.shape)
+                    end1 = time.time()
+                    start2 = time.time()
                     y_new = torch.randn((B, 1, H)).cuda()
                     x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
-        return t.elapsed
+                    end2 = time.time()
+                    time1.append(end1 - start1)
+                    time2.append(end2 - start2)
+        return t.elapsed, np.sum(time1), np.sum(time2)
 
     def bench_uncached_chrome_trace(module, x, n_gen, do_profile=False):
         x = x.cuda()
@@ -178,7 +195,7 @@ if __name__ == "__main__":
                         y = check_shape(layer(x.cuda()), x.shape)
                         y_new = torch.randn((B, 1, H)).cuda()
                         x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
-            print(prof.key_averages().table(sort_by="cpu_time_total"))
+            # print(prof.key_averages().table(sort_by="cpu_time_total"))
             prof.export_chrome_trace("bench_uncached.json")
         return 
 
@@ -187,15 +204,21 @@ if __name__ == "__main__":
         bench_uncached(layer, x, n_gen)
         
     # bench
-    iters = []
+    total_time = []
+    time1 = []
+    time2 = []
     for i in tqdm(range(8)):
-        iters.append(bench_uncached(layer, x, n_gen))
+        iter = bench_uncached(layer, x, n_gen)
+        total_time.append(iter[0])
+        time1.append(iter[1])
+        time2.append(iter[2])
     
     
-    mean = np.mean(iters)
-    stddev = np.std(iters)
+    mean = np.mean(total_time)
+    stddev = np.std(total_time)
     print(f"Runtime w/o cache: {mean:.2f} +- {stddev:.2f}ms")
-
+    print(f"forward uncached: {np.mean(time1):.3f} += {np.std(time1):.3f} ms")
+    print(f"cat uncached: {np.mean(time2):.3f} += {np.std(time2):.3f} ms")
     bench_uncached_chrome_trace(layer, x, 2)
 
     # warmup
@@ -203,12 +226,18 @@ if __name__ == "__main__":
         bench(layer, x, n_gen)
 
     # bench
-    iters = []
+    total_time = []
+    time1 = []
+    time2 = []
     for i in tqdm(range(8)):
-        iters.append(bench(layer, x, n_gen))
+        iter = bench(layer, x, n_gen)
+        total_time.append(iter[0])
+        time1.append(iter[1])
+        time2.append(iter[2])
 
-    mean = np.mean(iters)
-    stddev = np.std(iters)
+    mean = np.mean(total_time)
+    stddev = np.std(total_time)
     print(f"Runtime w/ cache: {mean:.2f} +- {stddev:.2f}ms")
-
+    print(f"forward cached: {np.mean(time1):.3f} += {np.std(time1):.3f} ms")
+    print(f"cat cached: {np.mean(time2):.3f} += {np.std(time2):.3f} ms")
     bench_chrome_trace(layer, x, 2)
