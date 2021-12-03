@@ -1,7 +1,7 @@
 # set up logging
 import logging
 logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
         level=logging.INFO,
 )
@@ -112,6 +112,3 @@ print("######################################################################")
 completion = ''.join([train_dataset.itos[int(i)] for i in y])
 print(completion)
 print("Inference Time: " + str(end_time - start_time) + " seconds")
-
-
-
