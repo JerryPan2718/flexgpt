@@ -3,7 +3,8 @@ from mem_selfattn import CachedSelfAttn
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from loguru import logger
+import logging
+
 
 class MemBlock(nn.Module):
     """ a MemTransformer block """
@@ -22,3 +23,11 @@ class MemBlock(nn.Module):
         x = x + self.attn(self.ln1(x))
         x = x + self.mlp(self.ln2(x))
         return x
+
+
+
+if __name__ == "__main__":
+    B, K, T, H = (16, 12, 512, 768)
+    n_gen = T
+    layer = CachedSelfAttn(K, H).cuda()
+    x = torch.randn((B, T, H)).cuda()

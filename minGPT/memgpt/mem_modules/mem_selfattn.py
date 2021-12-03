@@ -121,9 +121,10 @@ class CachedSelfAttn(CachedModule):
 if __name__ == "__main__":
     B, K, T, H = (16, 12, 128, 768)
     n_gen = T
+    
     layer = CachedSelfAttn(K, H).cuda()
     x = torch.randn((B, T, H)).cuda()
-
+    
     def bench(module, x, n_gen):
         x = x.cuda()
         B, T, H = x.shape
