@@ -1,1 +1,165 @@
 Evaluating with bsz 2 tgt_len 5 ext_len 0 mem_len 32 clamp_len -1
+Evaluating with bsz 2 tgt_len 5 ext_len 0 mem_len 32 clamp_len -1
+Evaluating with bsz 2 tgt_len 5 ext_len 0 mem_len 32 clamp_len -1
+Evaluating with bsz 2 tgt_len 5 ext_len 0 mem_len 32 clamp_len -1
+Evaluating with bsz 2 tgt_len 5 ext_len 0 mem_len 32 clamp_len -1
+Evaluating with bsz 2 tgt_len 5 ext_len 0 mem_len 32 clamp_len -1
+Evaluating with bsz 2 tgt_len 5 ext_len 0 mem_len 32 clamp_len -1
+Evaluating with bsz 2 tgt_len 5 ext_len 0 mem_len 32 clamp_len -1
+Evaluating with bsz 2 tgt_len 5 ext_len 0 mem_len 32 clamp_len -1
+Evaluating with bsz 2 tgt_len 5 ext_len 0 mem_len 32 clamp_len -1
+Evaluating with bsz 2 tgt_len 5 ext_len 0 mem_len 32 clamp_len -1
+Evaluating with bsz 2 tgt_len 5 ext_len 128 mem_len 32 clamp_len -1
+Evaluating with bsz 2 tgt_len 5 ext_len 50000 mem_len 32 clamp_len -1
+Evaluating with bsz 2 tgt_len 5 ext_len 50000 mem_len 32 clamp_len -1
+Evaluating with bsz 2 tgt_len 5 ext_len 50000 mem_len 32 clamp_len -1
+Evaluating with bsz 2 tgt_len 5 ext_len 50000 mem_len 32 clamp_len -1
+Evaluating with bsz 2 tgt_len 5 ext_len 50000 mem_len 32 clamp_len -1
+Evaluating with bsz 2 tgt_len 5 ext_len 50000 mem_len 32 clamp_len -1
+Evaluating with bsz 2 tgt_len 5 ext_len 50000 mem_len 0 clamp_len -1
+Time : 770.78s, 770.78ms/segment
+====================================================================================================
+| valid loss 12.50 | valid ppl 267681.275 
+====================================================================================================
+Evaluating with bsz 2 tgt_len 5 ext_len 50000 mem_len 50000 clamp_len -1
+Evaluating with bsz 2 tgt_len 128 ext_len 50000 mem_len 50000 clamp_len -1
+Evaluating with bsz 2 tgt_len 128 ext_len 50000 mem_len 50000 clamp_len -1
+Evaluating with bsz 2 tgt_len 128 ext_len 50000 mem_len 50000 clamp_len -1
+Evaluating with bsz 2 tgt_len 128 ext_len 50000 mem_len 50000 clamp_len -1
+Evaluating with bsz 2 tgt_len 128 ext_len 50000 mem_len 50000 clamp_len -1
+Evaluating with bsz 2 tgt_len 128 ext_len 50000 mem_len 50000 clamp_len -1
+Time : 4.15s, 259.41ms/segment
+====================================================================================================
+| valid loss 12.41 | valid ppl 245464.752 
+====================================================================================================
+Evaluating with bsz 2 tgt_len 128 ext_len 50000 mem_len 0 clamp_len -1
+Time : 2.34s, 146.04ms/segment
+====================================================================================================
+| valid loss 12.46 | valid ppl 258781.341 
+====================================================================================================
+Evaluating with bsz 2 tgt_len 128 ext_len 0 mem_len 0 clamp_len -1
+Time : 17.52s, 20.58ms/segment
+====================================================================================================
+| valid loss 12.51 | valid ppl 270204.515 
+====================================================================================================
+Evaluating with bsz 2 tgt_len 128 ext_len 0 mem_len 64 clamp_len -1
+Time : 18.49s, 21.73ms/segment
+====================================================================================================
+| valid loss 12.49 | valid ppl 265116.583 
+====================================================================================================
+Evaluating with bsz 2 tgt_len 128 ext_len 0 mem_len 10000 clamp_len -1
+Time : 123.92s, 145.62ms/segment
+====================================================================================================
+| valid loss 12.54 | valid ppl 278626.191 
+====================================================================================================
+Evaluating with bsz 2 tgt_len 128 ext_len 50000 mem_len 50000 clamp_len -1
+Time : 4.14s, 258.72ms/segment
+====================================================================================================
+| valid loss 12.44 | valid ppl 252620.164 
+====================================================================================================
+Evaluating with bsz 2 tgt_len 128 ext_len 50000 mem_len 50000 clamp_len -1
+Time : 4.15s, 259.18ms/segment
+====================================================================================================
+| valid loss 12.40 | valid ppl 243771.423 
+====================================================================================================
+Evaluating with bsz 2 tgt_len 128 ext_len 50000 mem_len 0 clamp_len -1
+Time : 2.34s, 146.17ms/segment
+====================================================================================================
+| valid loss 12.47 | valid ppl 260729.557 
+====================================================================================================
+Evaluating with bsz 2 tgt_len 1 ext_len 50000 mem_len 0 clamp_len -1
+Evaluating with bsz 2 tgt_len 1 ext_len 50000 mem_len 0 clamp_len -1
+Time : 36.15s, 36.12ms/segment
+====================================================================================================
+| valid loss 12.36 | valid ppl 232315.846 
+====================================================================================================
+Evaluating with bsz 2 tgt_len 1 ext_len 50000 mem_len 50000 clamp_len -1
+Time : 62.97s, 62.90ms/segment
+====================================================================================================
+| valid loss 12.30 | valid ppl 218992.999 
+====================================================================================================
+Evaluating with bsz 2 tgt_len 1 ext_len 50000 mem_len 0 clamp_len -1
+Time : 25.59s, 25.56ms/segment
+====================================================================================================
+| valid loss 12.40 | valid ppl 241928.051 
+====================================================================================================
+Evaluating with bsz 2 tgt_len 1 ext_len 50000 mem_len 0 clamp_len -1
+Time : 25.42s, 25.40ms/segment
+====================================================================================================
+| valid loss 12.39 | valid ppl 241027.536 
+====================================================================================================
+Evaluating with bsz 2 tgt_len 1 ext_len 50000 mem_len 50000 clamp_len -1
+Time : 42.33s, 42.29ms/segment
+====================================================================================================
+| valid loss 12.39 | valid ppl 241500.707 
+====================================================================================================
+Evaluating with bsz 2 tgt_len 1 ext_len 50000 mem_len 50000 clamp_len -1
+Time : 62.90s, 62.84ms/segment
+====================================================================================================
+| valid loss 12.38 | valid ppl 238779.213 
+====================================================================================================
+Evaluating with bsz 1 tgt_len 1 ext_len 50000 mem_len 50000 clamp_len -1
+Time : 30.29s, 30.26ms/segment
+====================================================================================================
+| valid loss 12.50 | valid ppl 267076.277 
+====================================================================================================
+Evaluating with bsz 1 tgt_len 128 ext_len 50000 mem_len 50000 clamp_len -1
+Time : 0.49s, 60.65ms/segment
+====================================================================================================
+| valid loss 12.48 | valid ppl 261993.771 
+====================================================================================================
+Evaluating with bsz 1 tgt_len 128 ext_len 50000 mem_len 50000 clamp_len -1
+Time : 0.48s, 59.71ms/segment
+====================================================================================================
+| valid loss 12.45 | valid ppl 255569.970 
+====================================================================================================
+Evaluating with bsz 1 tgt_len 128 ext_len 50000 mem_len 0 clamp_len -1
+Time : 0.40s, 49.59ms/segment
+====================================================================================================
+| valid loss 12.56 | valid ppl 283606.376 
+====================================================================================================
+Evaluating with bsz 1 tgt_len 128 ext_len 50000 mem_len 0 clamp_len -1
+Evaluating with bsz 1 tgt_len 128 ext_len 50000 mem_len 0 clamp_len -1
+Time : 0.40s, 49.43ms/segment
+====================================================================================================
+| valid loss 12.48 | valid ppl 262431.917 
+====================================================================================================
+Evaluating with bsz 1 tgt_len 1 ext_len 50000 mem_len 0 clamp_len -1
+Time : 19.74s, 19.72ms/segment
+====================================================================================================
+| valid loss 12.55 | valid ppl 280987.768 
+====================================================================================================
+Evaluating with bsz 1 tgt_len 1 ext_len 50000 mem_len 100 clamp_len -1
+Time : 21.52s, 21.50ms/segment
+====================================================================================================
+| valid loss 12.53 | valid ppl 275275.164 
+====================================================================================================
+Evaluating with bsz 1 tgt_len 1 ext_len 50000 mem_len 100 clamp_len -1
+Evaluating with bsz 1 tgt_len 1 ext_len 50000 mem_len 100 clamp_len -1
+Evaluating with bsz 1 tgt_len 1 ext_len 50000 mem_len 50000 clamp_len -1
+Evaluating with bsz 1 tgt_len 1 ext_len 50000 mem_len 50000 clamp_len -1
+Evaluating with bsz 1 tgt_len 1 ext_len 50000 mem_len 50000 clamp_len -1
+Time : 131.31s, 262.10ms/segment
+====================================================================================================
+| valid loss 12.50 | valid ppl 267312.048 
+====================================================================================================
+Evaluating with bsz 1 tgt_len 1 ext_len 50000 mem_len 50000 clamp_len -1
+Time : 123.21s, 245.93ms/segment
+====================================================================================================
+| valid loss 12.45 | valid ppl 254501.582 
+====================================================================================================
+Evaluating with bsz 1 tgt_len 1 ext_len 50000 mem_len 0 clamp_len -1
+Time : 86.40s, 172.46ms/segment
+====================================================================================================
+| valid loss 12.56 | valid ppl 286289.286 
+====================================================================================================
+Evaluating with bsz 1 tgt_len 1 ext_len 50000 mem_len 0 clamp_len -1
+Time : 85.71s, 171.08ms/segment
+====================================================================================================
+| valid loss 12.53 | valid ppl 275404.355 
+====================================================================================================
+Evaluating with bsz 1 tgt_len 1 ext_len 50000 mem_len 0 clamp_len -1
+Time : 86.64s, 172.94ms/segment
+====================================================================================================
+| valid loss 12.51 | valid ppl 270305.397 
+====================================================================================================

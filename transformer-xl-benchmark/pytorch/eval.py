@@ -19,9 +19,11 @@ d_head = 50
 d_inner = 1000
 dropout = 0.0
 dropatt = 0.0
-tgt_len = 5
-ext_len = 0
-mem_len = 0
+# tgt_len = 5
+# ext_len = 128
+# mem_len = 0
+attn_type = 0
+input_seq_length = 500
 ##################################################### CONFIG #####################################################
 
 parser = argparse.ArgumentParser(description='PyTorch Transformer Language Model')
@@ -33,17 +35,17 @@ parser.add_argument('--dataset', type=str, default='wt103',
 parser.add_argument('--split', type=str, default='valid',
                     choices=['all', 'valid', 'test'],
                     help='which split to evaluate')
-parser.add_argument('--batch_size', type=int, default=2,
+parser.add_argument('--batch_size', type=int, default=1,
                     help='batch size')
-parser.add_argument('--tgt_len', type=int, default=5,
+parser.add_argument('--tgt_len', type=int, default=1,
                     help='number of tokens to predict')
-parser.add_argument('--ext_len', type=int, default=0,
+parser.add_argument('--ext_len', type=int, default=50000,
                     help='length of the extended context')
-parser.add_argument('--mem_len', type=int, default=32,
+parser.add_argument('--mem_len', type=int, default=0,
                     help='length of the retained previous heads')
 parser.add_argument('--clamp_len', type=int, default=-1,
                     help='max positional embedding index')
-parser.add_argument('--cuda', action='store_true',
+parser.add_argument('--cuda', type=bool, default=False,
                     help='use CUDA')
 parser.add_argument('--work_dir', type=str, default="../logs",
                     help='path to the work_dir')
@@ -69,6 +71,7 @@ va_iter = corpus.get_iterator('valid', args.batch_size, args.tgt_len,
 te_iter = corpus.get_iterator('test', args.batch_size, args.tgt_len,
     device=device, ext_len=args.ext_len)
 
+print(len(list(va_iter)))
 ###############################################################################
 # Build the model
 ###############################################################################
@@ -119,7 +122,7 @@ def weights_init(m):
 
 
 model = MemTransformerLM(ntokens, n_layer, n_head, d_model, d_head, d_inner, dropout, dropatt,
-                        tgt_len=tgt_len, ext_len=ext_len, mem_len=mem_len)
+                        tgt_len=args.tgt_len, ext_len=args.ext_len, mem_len=args.mem_len, attn_type=attn_type)
 model.apply(weights_init)
 model.word_emb.apply(weights_init) # ensure embedding init is not overridden by out_layer in case of weight sharing
 model = model.to(device)
@@ -146,18 +149,28 @@ def evaluate(eval_iter):
     with torch.no_grad():
         mems = tuple()
         for idx, (data, target, seq_len) in enumerate(eval_iter):
+            if idx % 200 == 0:
+                print(idx, data.size()[0], target.shape)
             ret = model(data, target, *mems)
             loss, mems = ret[0], ret[1:]
+            # print([mem.shape for mem in mems]) 
             loss = loss.mean()
             total_loss += seq_len * loss.item()
             total_len += seq_len
+            if data.size()[0] > input_seq_length:
+                data.size()[0]
+                break
         total_time = time.time() - start_time
     logging('Time : {:.2f}s, {:.2f}ms/segment'.format(
             total_time, 1000 * total_time / (idx+1)))
     return total_loss / total_len
 
 # Run on test data.
-valid_loss = evaluate(va_iter)
+with torch.autograd.profiler.profile() as prof:
+    valid_loss = evaluate(va_iter)
+print(prof.key_averages().table(sort_by="cpu_time_total"))
+prof.export_chrome_trace("bench_uncached.json")
+
 test_loss = None
 # if args.split == 'all':
 #     test_loss = evaluate(te_iter)

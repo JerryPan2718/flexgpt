@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.DEBUG)
 
 
 class CachedSelfAttn(CachedModule):
-    def __init__(self, n_head, n_hidden, dropout=0.1, max_t=2048):
+    def __init__(self, n_head, n_hidden, dropout=0.1, max_t=2048, cache_length=64):
         """
         q: BKT(H/K)
         k: BKT(H/K)
@@ -31,6 +31,8 @@ class CachedSelfAttn(CachedModule):
         self.register_buffer("mask", torch.tril(torch.ones(max_t, max_t)).view(1, 1, max_t, max_t))
         self.n_head = n_head
         self.n_hidden = n_hidden
+        self.cache_counter = 0
+        self.cache_length = cache_length
     
     def clear_cache(self):
         self.q.clear_cache()
@@ -38,7 +40,7 @@ class CachedSelfAttn(CachedModule):
         self.v.clear_cache()
         self.proj.clear_cache()
         self.cache = {}
-    
+
     def set_cache(self, key, value):
         self.cache[key] = value
     
@@ -48,6 +50,9 @@ class CachedSelfAttn(CachedModule):
             val = val.to(device)
         return val
         
+    def reset_cache_counter(self):
+        self.cache_counter = 0
+    
     def forward_uncached(self, x):
         B, T, H = x.size()
         K = self.n_head
@@ -105,16 +110,20 @@ class CachedSelfAttn(CachedModule):
         qkt_cached = self.get_cache("qkt", device=x.device)
         y_cached = self.get_cache("y", device=x.device)
 
-        if y_cached is None or qkt_cached is None:
+        # print(self.cache_counter)
+        if (y_cached is None or qkt_cached is None) or self.cache_counter >= self.cache_length:
             self.clear_cache()
             qkt, y = self.forward_uncached(x)
             self.set_cache("qkt", check_shape(qkt, (B, K, T, T)))
             self.set_cache("y", check_shape(y, (B, K, T, H // K)))
+            # print(f"{self.cache_counter} is uncached")
         else:
             qkt, y = self.forward_cached(x, qkt_cached, y_cached)
             self.set_cache("qkt", check_shape(qkt, (B, K, T, T)))
             self.set_cache("y", check_shape(y, (B, K, T, H // K)))
+            # print(f"{self.cache_counter} is cached")
         y = y.transpose(1, 2).contiguous().view(B, T, H)
+        self.cache_counter += 1
         return y
 
 
@@ -122,19 +131,25 @@ if __name__ == "__main__":
     B, K, T, H = (16, 12, 128, 768)
     n_gen = T
     
-    layer = CachedSelfAttn(K, H).cuda()
+    layer0 = CachedSelfAttn(K, H, cache_length=0).cuda()
+    layer1 = CachedSelfAttn(K, H, cache_length=32).cuda()
+    layer2 = CachedSelfAttn(K, H, cache_length=64).cuda()
+    layer3 = CachedSelfAttn(K, H, cache_length=96).cuda()
+    layer4 = CachedSelfAttn(K, H, cache_length=128).cuda()
     x = torch.randn((B, T, H)).cuda()
     
-    def bench(module, x, n_gen):
+    def bench(module, x, n_gen, memUsage):
         x = x.cuda()
         B, T, H = x.shape
         module.clear_cache()
+        module.reset_cache_counter()
         with torch.inference_mode():
             with PytorchTimer(verbose=False) as t:
                 for i in range(1, n_gen + 1):
-                    y = check_shape(layer(x.cuda()), x.shape)
+                    y = check_shape(module(x.cuda()), x.shape)
                     y_new = torch.randn((B, 1, H)).cuda()
                     x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
+                    memUsage.append(torch.cuda.memory_allocated())
         return t.elapsed
     
     def bench_chrome_trace(module, x, n_gen):
@@ -145,24 +160,26 @@ if __name__ == "__main__":
             with torch.autograd.profiler.profile() as prof:
                 with torch.no_grad():
                     for i in range(1, n_gen + 1):
-                        y = check_shape(layer(x.cuda()), x.shape)
+                        y = check_shape(module(x.cuda()), x.shape)
                         y_new = torch.randn((B, 1, H)).cuda()
                         x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
             # print(prof.key_averages().table(sort_by="cpu_time_total"))
-            prof.export_chrome_trace("bench_cached.json")
+            # prof.export_chrome_trace("bench_cached.json")
         return 
 
-    def bench_uncached(module, x, n_gen):
+    def bench_uncached(module, x, n_gen, memUsage):
         x = x.cuda()
         B, T, H = x.shape
         module.clear_cache()
+        module.reset_cache_counter()
         with torch.inference_mode():
             with PytorchTimer(verbose=False) as t:
                 for i in range(1, n_gen + 1):
                     module.clear_cache()
-                    y = check_shape(layer(x.cuda()), x.shape)
+                    y = check_shape(module(x.cuda()), x.shape)
                     y_new = torch.randn((B, 1, H)).cuda()
                     x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
+                    memUsage.append(torch.cuda.memory_allocated())
         return t.elapsed
 
     def bench_uncached_chrome_trace(module, x, n_gen, do_profile=False):
@@ -178,40 +195,89 @@ if __name__ == "__main__":
                 with torch.no_grad():
                     for i in range(1, n_gen + 1):
                         module.clear_cache()
-                        y = check_shape(layer(x.cuda()), x.shape)
+                        y = check_shape(module(x.cuda()), x.shape)
                         y_new = torch.randn((B, 1, H)).cuda()
                         x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
             # print(prof.key_averages().table(sort_by="cpu_time_total"))
-            prof.export_chrome_trace("bench_uncached.json")
+            # prof.export_chrome_trace("bench_uncached.json")
         return 
 
     # warmup
     for i in tqdm(range(4)):
-        bench_uncached(layer, x, n_gen)
+        bench_uncached(layer0, x, n_gen, [])
         
     # bench
     total_time = []
-
+    memUsage = []
     for i in tqdm(range(8)):
-        total_time.append(bench_uncached(layer, x, n_gen))    
+        total_time.append(bench_uncached(layer0, x, n_gen, memUsage))    
     
     mean = np.mean(total_time)
     stddev = np.std(total_time)
     print(f"Runtime w/o cache: {mean:.2f} +- {stddev:.2f}ms")
+    print(f"memUsage w/o cache: {np.mean(memUsage) / 10 ** 6:.2f} +- {np.std(memUsage) / 10 ** 6:.2f}MB")
 
-    bench_uncached_chrome_trace(layer, x, 2)
+    # bench_uncached_chrome_trace(layer, x, 2)
 
     # warmup
     for i in tqdm(range(4)):
-        bench(layer, x, n_gen)
+        bench(layer1, x, n_gen, [])
 
     # bench
     total_time = []
+    memUsage = []
     for i in tqdm(range(8)):
-        total_time.append(bench(layer, x, n_gen))
+        total_time.append(bench(layer1, x, n_gen, memUsage))
 
     mean = np.mean(total_time)
     stddev = np.std(total_time)
-    print(f"Runtime w/ cache: {mean:.2f} +- {stddev:.2f}ms")
+    print(f"Runtime w/ cache_length=32: {mean:.2f} +- {stddev:.2f}ms")
+    print(f"memUsage w/ cache_length=32: {np.mean(memUsage) / 10 ** 6:.2f} +- {np.std(memUsage) / 10 ** 6:.2f}MB")
     
-    bench_chrome_trace(layer, x, 2)
+    # bench_chrome_trace(layer, x, 2)
+
+    # warmup
+    for i in tqdm(range(4)):
+        bench(layer2, x, n_gen, [])
+
+    # bench
+    total_time = []
+    memUsage = []
+    for i in tqdm(range(8)):
+        total_time.append(bench(layer2, x, n_gen, memUsage))
+
+    mean = np.mean(total_time)
+    stddev = np.std(total_time)
+    print(f"Runtime w/ cache_length=64: {mean:.2f} +- {stddev:.2f}ms")
+    print(f"memUsage w/ cache_length=64: {np.mean(memUsage) / 10 ** 6:.2f} +- {np.std(memUsage) / 10 ** 6:.2f}MB")
+
+
+    # warmup
+    for i in tqdm(range(4)):
+        bench(layer3, x, n_gen, [])
+
+    # bench
+    total_time = []
+    memUsage = []
+    for i in tqdm(range(8)):
+        total_time.append(bench(layer3, x, n_gen, memUsage))
+
+    mean = np.mean(total_time)
+    stddev = np.std(total_time)
+    print(f"Runtime w/ cache_length=96: {mean:.2f} +- {stddev:.2f}ms")
+    print(f"memUsage w/ cache_length=96: {np.mean(memUsage) / 10 ** 6:.2f} +- {np.std(memUsage) / 10 ** 6:.2f}MB")
+
+    # warmup
+    for i in tqdm(range(4)):
+        bench(layer4, x, n_gen, [])
+
+    # bench
+    total_time = []
+    memUsage = []
+    for i in tqdm(range(8)):
+        total_time.append(bench(layer4, x, n_gen, memUsage))
+
+    mean = np.mean(total_time)
+    stddev = np.std(total_time)
+    print(f"Runtime w/ cache_length=128: {mean:.2f} +- {stddev:.2f}ms")
+    print(f"memUsage w/ cache_length=128: {np.mean(memUsage) / 10 ** 6:.2f} +- {np.std(memUsage) / 10 ** 6:.2f}MB")
