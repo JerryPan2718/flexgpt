@@ -2,6 +2,7 @@ from utils import check_shape, CachedModule, PytorchTimer
 from mem_linear import CachedLinear
 import time
 import numpy as np
+import pandas as pd
 import math
 import torch
 import torch.nn as nn
@@ -126,158 +127,65 @@ class CachedSelfAttn(CachedModule):
         self.cache_counter += 1
         return y
 
+### Helper function for Benchmark ###
+def bench_cached(module, x, n_gen, mem_usage):
+        x = x.cuda()
+        B, T, H = x.shape
+        module.clear_cache()
+        module.reset_cache_counter()
+        with torch.inference_mode():
+            with PytorchTimer(verbose=False) as t:
+                for i in range(1, n_gen + 1):
+                    y = check_shape(module(x.cuda()), x.shape)
+                    y_new = torch.randn((B, 1, H)).cuda()
+                    x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
+                    mem_usage.append(torch.cuda.memory_allocated())
+        return t.elapsed
+
+def bench_uncached(module, x, n_gen, mem_usage):
+    x = x.cuda()
+    B, T, H = x.shape
+    module.clear_cache()
+    module.reset_cache_counter()
+    with torch.inference_mode():
+        with PytorchTimer(verbose=False) as t:
+            for i in range(1, n_gen + 1):
+                module.clear_cache()
+                y = check_shape(module(x.cuda()), x.shape)
+                y_new = torch.randn((B, 1, H)).cuda()
+                x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
+                mem_usage.append(torch.cuda.memory_allocated())
+    return t.elapsed
+
+def benchmark_pipeline(benchmark_function, module, x, n_gen):
+        # warmup
+        for i in tqdm(range(4)):
+            benchmark_function(module, x, n_gen, [])
+            
+        # bench
+        total_time = []
+        mem_usage = []
+        for i in tqdm(range(8)):
+            total_time.append(benchmark_function(module, x, n_gen, mem_usage))    
+        return [np.mean(total_time), np.std(total_time), np.mean(mem_usage) / 10 ** 6, np.std(mem_usage) / 10 ** 6]
+
 
 if __name__ == "__main__":
-    B, K, T, H = (16, 12, 128, 768)
-    n_gen = T
-    
-    layer0 = CachedSelfAttn(K, H, cache_length=0).cuda()
-    layer1 = CachedSelfAttn(K, H, cache_length=32).cuda()
-    layer2 = CachedSelfAttn(K, H, cache_length=64).cuda()
-    layer3 = CachedSelfAttn(K, H, cache_length=96).cuda()
-    layer4 = CachedSelfAttn(K, H, cache_length=128).cuda()
-    x = torch.randn((B, T, H)).cuda()
-    
-    def bench(module, x, n_gen, memUsage):
-        x = x.cuda()
-        B, T, H = x.shape
-        module.clear_cache()
-        module.reset_cache_counter()
-        with torch.inference_mode():
-            with PytorchTimer(verbose=False) as t:
-                for i in range(1, n_gen + 1):
-                    y = check_shape(module(x.cuda()), x.shape)
-                    y_new = torch.randn((B, 1, H)).cuda()
-                    x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
-                    memUsage.append(torch.cuda.memory_allocated())
-        return t.elapsed
-    
-    def bench_chrome_trace(module, x, n_gen):
-        x = x.cuda()
-        B, T, H = x.shape
-        module.clear_cache()
-        with torch.inference_mode():
-            with torch.autograd.profiler.profile() as prof:
-                with torch.no_grad():
-                    for i in range(1, n_gen + 1):
-                        y = check_shape(module(x.cuda()), x.shape)
-                        y_new = torch.randn((B, 1, H)).cuda()
-                        x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
-            # print(prof.key_averages().table(sort_by="cpu_time_total"))
-            # prof.export_chrome_trace("bench_cached.json")
-        return 
-
-    def bench_uncached(module, x, n_gen, memUsage):
-        x = x.cuda()
-        B, T, H = x.shape
-        module.clear_cache()
-        module.reset_cache_counter()
-        with torch.inference_mode():
-            with PytorchTimer(verbose=False) as t:
-                for i in range(1, n_gen + 1):
-                    module.clear_cache()
-                    y = check_shape(module(x.cuda()), x.shape)
-                    y_new = torch.randn((B, 1, H)).cuda()
-                    x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
-                    memUsage.append(torch.cuda.memory_allocated())
-        return t.elapsed
-
-    def bench_uncached_chrome_trace(module, x, n_gen, do_profile=False):
-        x = x.cuda()
-        B, T, H = x.shape
-        module.clear_cache()
-
-        if do_profile:
-            n_gen = 1
-
-        with torch.inference_mode():
-            with torch.autograd.profiler.profile() as prof:
-                with torch.no_grad():
-                    for i in range(1, n_gen + 1):
-                        module.clear_cache()
-                        y = check_shape(module(x.cuda()), x.shape)
-                        y_new = torch.randn((B, 1, H)).cuda()
-                        x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
-            # print(prof.key_averages().table(sort_by="cpu_time_total"))
-            # prof.export_chrome_trace("bench_uncached.json")
-        return 
-
-    # warmup
-    for i in tqdm(range(4)):
-        bench_uncached(layer0, x, n_gen, [])
-        
-    # bench
-    total_time = []
-    memUsage = []
-    for i in tqdm(range(8)):
-        total_time.append(bench_uncached(layer0, x, n_gen, memUsage))    
-    
-    mean = np.mean(total_time)
-    stddev = np.std(total_time)
-    print(f"Runtime w/o cache: {mean:.2f} +- {stddev:.2f}ms")
-    print(f"memUsage w/o cache: {np.mean(memUsage) / 10 ** 6:.2f} +- {np.std(memUsage) / 10 ** 6:.2f}MB")
-
-    # bench_uncached_chrome_trace(layer, x, 2)
-
-    # warmup
-    for i in tqdm(range(4)):
-        bench(layer1, x, n_gen, [])
-
-    # bench
-    total_time = []
-    memUsage = []
-    for i in tqdm(range(8)):
-        total_time.append(bench(layer1, x, n_gen, memUsage))
-
-    mean = np.mean(total_time)
-    stddev = np.std(total_time)
-    print(f"Runtime w/ cache_length=32: {mean:.2f} +- {stddev:.2f}ms")
-    print(f"memUsage w/ cache_length=32: {np.mean(memUsage) / 10 ** 6:.2f} +- {np.std(memUsage) / 10 ** 6:.2f}MB")
-    
-    # bench_chrome_trace(layer, x, 2)
-
-    # warmup
-    for i in tqdm(range(4)):
-        bench(layer2, x, n_gen, [])
-
-    # bench
-    total_time = []
-    memUsage = []
-    for i in tqdm(range(8)):
-        total_time.append(bench(layer2, x, n_gen, memUsage))
-
-    mean = np.mean(total_time)
-    stddev = np.std(total_time)
-    print(f"Runtime w/ cache_length=64: {mean:.2f} +- {stddev:.2f}ms")
-    print(f"memUsage w/ cache_length=64: {np.mean(memUsage) / 10 ** 6:.2f} +- {np.std(memUsage) / 10 ** 6:.2f}MB")
+    d = {}
+    Tcs = [128] # , 256, 512, 1024
+    B, K, H = (48, 8, 1600)
+    for Tc in Tcs:
+        Tg = Tc 
+        cache_lengths = [0, Tg // 4, Tg // 2, (Tg * 3) // 4, Tg]
+        x = torch.randn((B, Tc, H)).cuda()
+        for cache_length in cache_lengths:
+            print(f"Tc {Tc} cache_length {cache_length}")
+            layer = CachedSelfAttn(K, H, cache_length=cache_length).cuda()
+            ret = benchmark_pipeline(bench_cached, layer, x, Tg)
+            d[f"Tc={Tc} Tg={Tg} cache_length={cache_length}"] = ret
 
 
-    # warmup
-    for i in tqdm(range(4)):
-        bench(layer3, x, n_gen, [])
 
-    # bench
-    total_time = []
-    memUsage = []
-    for i in tqdm(range(8)):
-        total_time.append(bench(layer3, x, n_gen, memUsage))
-
-    mean = np.mean(total_time)
-    stddev = np.std(total_time)
-    print(f"Runtime w/ cache_length=96: {mean:.2f} +- {stddev:.2f}ms")
-    print(f"memUsage w/ cache_length=96: {np.mean(memUsage) / 10 ** 6:.2f} +- {np.std(memUsage) / 10 ** 6:.2f}MB")
-
-    # warmup
-    for i in tqdm(range(4)):
-        bench(layer4, x, n_gen, [])
-
-    # bench
-    total_time = []
-    memUsage = []
-    for i in tqdm(range(8)):
-        total_time.append(bench(layer4, x, n_gen, memUsage))
-
-    mean = np.mean(total_time)
-    stddev = np.std(total_time)
-    print(f"Runtime w/ cache_length=128: {mean:.2f} +- {stddev:.2f}ms")
-    print(f"memUsage w/ cache_length=128: {np.mean(memUsage) / 10 ** 6:.2f} +- {np.std(memUsage) / 10 ** 6:.2f}MB")
+    df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(MB)", "mem_std(MB)"])
+    print(df)
+    df.to_csv("mem_selfattn.csv")
