@@ -170,23 +170,28 @@ def benchmark_pipeline(benchmark_function, module, x, n_gen):
         for i in tqdm(range(8)):
             ret = benchmark_function(module, x, n_gen)
             total_time.append(ret[0])
-            mem_usage.append(ret[1])  
+            mem_usage += ret[1]
+        print(total_time)
+        print(mem_usage)
+        return [np.mean(total_time), np.std(total_time), np.mean(mem_usage) / 10 ** 6, np.std(mem_usage) / 10 ** 6]
+
+def pipeline(benchmark_function, module):
+        # warmup
+        for i in tqdm(range(4)):
+            benchmark_function(module, x, Tg)
+
+        # bench
+        total_time = []
+        mem_usage = []
+        for i in tqdm(range(8)):
+            ret = benchmark_function(module, x, Tg)
+            total_time.append(ret[0])    
+            mem_usage += ret[1]
+
         return [np.mean(total_time), np.std(total_time), np.mean(mem_usage) / 10 ** 6, np.std(mem_usage) / 10 ** 6]
 
 
 if __name__ == "__main__":
-    # B, K, H = (48, 8, 1600)
-    # Tc = 128
-    # Tg = Tc
-    # x = torch.randn((B, Tc, H)).cuda()
-    # layer = CachedSelfAttn(K, H, cache_length=0).cuda()
-    # ret1 = benchmark_pipeline(bench_cached, layer, x, Tg)
-    # print(ret1)
-    # layer = CachedSelfAttn(K, H, cache_length=Tg//4).cuda()
-    # ret2 = benchmark_pipeline(bench_cached, layer, x, Tg)
-    # print(ret2)
-
-
     # d = {}
     # Tcs = [128] # 128, 256, 512, 1024
     # B, K, H = (48, 8, 1600)
@@ -197,7 +202,7 @@ if __name__ == "__main__":
     #     for cache_length in cache_lengths:
     #         print(f"Tc {Tc} cache_length {cache_length}")
     #         layer = CachedSelfAttn(K, H, cache_length=cache_length).cuda()
-    #         ret = benchmark_pipeline(bench_cached, layer, x, Tg)
+    #         ret = pipeline(bench_cached, layer)
     #         d[f"Tc={Tc} Tg={Tg} cache_length={cache_length}"] = ret
     #         print(ret)
 
@@ -206,44 +211,74 @@ if __name__ == "__main__":
     # print(df)
     # df.to_csv("mem_selfattn.csv")
 
+
     B, K, Tc, H = (16, 12, 128, 768)
     Tg = Tc 
-
-    layer0 = CachedSelfAttn(K, H, cache_length=0).cuda()
-    layer1 = CachedSelfAttn(K, H, cache_length=32).cuda()
-    layer2 = CachedSelfAttn(K, H, cache_length=64).cuda()
-    layer3 = CachedSelfAttn(K, H, cache_length=96).cuda()
-    layer4 = CachedSelfAttn(K, H, cache_length=128).cuda()
+    cache_lengths = [0, Tg // 4, Tg // 2, (Tg * 3) // 4, Tg]
     x = torch.randn((B, Tc, H)).cuda()
+    for cache_length in cache_lengths:
+        layer = CachedSelfAttn(K, H, cache_length=cache_length).cuda()
+        ret = pipeline(bench_cached, layer)
+        print(ret)
 
-    # warmup
-    for i in tqdm(range(4)):
-        bench_cached(layer0, x, Tg, [])
+    # layer0 = CachedSelfAttn(K, H, cache_length=0).cuda()
+    # layer1 = CachedSelfAttn(K, H, cache_length=32).cuda()
+    # layer2 = CachedSelfAttn(K, H, cache_length=64).cuda()
+    # layer3 = CachedSelfAttn(K, H, cache_length=96).cuda()
+    # layer4 = CachedSelfAttn(K, H, cache_length=128).cuda()
+    # x = torch.randn((B, Tc, H)).cuda()
 
-    # bench
-    total_time = []
-    memUsage = []
-    for i in tqdm(range(8)):
-        total_time.append(bench_cached(layer0, x, Tg))    
+    
+    # ret1 = pipeline(bench_cached, layer0)
+    # print(ret1)
+    # ret2 = pipeline(bench_cached, layer1)
+    # print(ret2)
 
-    mean = np.mean(total_time)
-    stddev = np.std(total_time)
-    print(f"Runtime w/o cache: {mean:.2f} +- {stddev:.2f}ms")
-    print(f"memUsage w/o cache: {np.mean(memUsage) / 10 ** 6:.2f} +- {np.std(memUsage) / 10 ** 6:.2f}MB")
 
-    # bench_uncached_chrome_trace(layer, x, 2)
+    ############################################################## Works
+    # B, K, Tc, H = (16, 12, 128, 768)
+    # Tg = Tc 
 
-    # warmup
-    for i in tqdm(range(4)):
-        bench_cached(layer1, x, Tg, [])
+    # layer0 = CachedSelfAttn(K, H, cache_length=0).cuda()
+    # layer1 = CachedSelfAttn(K, H, cache_length=32).cuda()
+    # layer2 = CachedSelfAttn(K, H, cache_length=64).cuda()
+    # layer3 = CachedSelfAttn(K, H, cache_length=96).cuda()
+    # layer4 = CachedSelfAttn(K, H, cache_length=128).cuda()
+    # x = torch.randn((B, Tc, H)).cuda()
 
-    # bench
-    total_time = []
-    memUsage = []
-    for i in tqdm(range(8)):
-        total_time.append(bench_cached(layer1, x, Tg))
+    # # warmup
+    # for i in tqdm(range(4)):
+    #     bench_cached(layer0, x, Tg)
 
-    mean = np.mean(total_time)
-    stddev = np.std(total_time)
-    print(f"Runtime w/ cache_length=32: {mean:.2f} +- {stddev:.2f}ms")
-    print(f"memUsage w/ cache_length=32: {np.mean(memUsage) / 10 ** 6:.2f} +- {np.std(memUsage) / 10 ** 6:.2f}MB")
+    # # bench
+    # total_time = []
+    # memUsage = []
+    # for i in tqdm(range(8)):
+    #     ret = bench_cached(layer0, x, Tg)
+    #     total_time.append(ret[0])    
+    #     memUsage += ret[1]
+
+
+    # mean = np.mean(total_time)
+    # stddev = np.std(total_time)
+    # print(f"Runtime w/o cache: {mean:.2f} +- {stddev:.2f}ms")
+    # print(f"memUsage w/o cache: {np.mean(memUsage) / 10 ** 6:.2f} +- {np.std(memUsage) / 10 ** 6:.2f}MB")
+
+    # # bench_uncached_chrome_trace(layer, x, 2)
+
+    # # warmup
+    # for i in tqdm(range(4)):
+    #     bench_cached(layer1, x, Tg)
+
+    # # bench
+    # total_time = []
+    # memUsage = []
+    # for i in tqdm(range(8)):
+    #     ret = bench_cached(layer1, x, Tg)
+    #     total_time.append(ret[0])    
+    #     memUsage += ret[1]
+
+    # mean = np.mean(total_time)
+    # stddev = np.std(total_time)
+    # print(f"Runtime w/ cache_length=32: {mean:.2f} +- {stddev:.2f}ms")
+    # print(f"memUsage w/ cache_length=32: {np.mean(memUsage) / 10 ** 6:.2f} +- {np.std(memUsage) / 10 ** 6:.2f}MB")
