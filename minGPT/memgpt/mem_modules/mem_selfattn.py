@@ -159,22 +159,6 @@ def bench_uncached(module, x, n_gen):
                 mem_usage.append(torch.cuda.memory_allocated())
     return t.elapsed, mem_usage
 
-def benchmark_pipeline(benchmark_function, module, x, n_gen):
-        # warmup
-        for i in tqdm(range(4)):
-            benchmark_function(module, x, n_gen)
-            
-        # bench
-        total_time = []
-        mem_usage = []
-        for i in tqdm(range(8)):
-            ret = benchmark_function(module, x, n_gen)
-            total_time.append(ret[0])
-            mem_usage += ret[1]
-        print(total_time)
-        print(mem_usage)
-        return [np.mean(total_time), np.std(total_time), np.mean(mem_usage) / 10 ** 6, np.std(mem_usage) / 10 ** 6]
-
 def pipeline(benchmark_function, module):
         # warmup
         for i in tqdm(range(4)):
@@ -188,7 +172,7 @@ def pipeline(benchmark_function, module):
             total_time.append(ret[0])    
             mem_usage += ret[1]
 
-        return [np.mean(total_time), np.std(total_time), np.mean(mem_usage) / 10 ** 6, np.std(mem_usage) / 10 ** 6]
+        return np.round([np.mean(total_time), np.std(total_time), np.mean(mem_usage) / 10 ** 6, np.std(mem_usage) / 10 ** 6], 3)
 
 
 if __name__ == "__main__":
@@ -211,29 +195,46 @@ if __name__ == "__main__":
     # print(df)
     # df.to_csv("mem_selfattn.csv")
 
-
-    B, K, Tc, H = (16, 12, 128, 768)
-    Tg = Tc 
-    cache_lengths = [0, Tg // 4, Tg // 2, (Tg * 3) // 4, Tg]
-    x = torch.randn((B, Tc, H)).cuda()
-    for cache_length in cache_lengths:
-        layer = CachedSelfAttn(K, H, cache_length=cache_length).cuda()
-        ret = pipeline(bench_cached, layer)
-        print(ret)
-
-    # layer0 = CachedSelfAttn(K, H, cache_length=0).cuda()
-    # layer1 = CachedSelfAttn(K, H, cache_length=32).cuda()
-    # layer2 = CachedSelfAttn(K, H, cache_length=64).cuda()
-    # layer3 = CachedSelfAttn(K, H, cache_length=96).cuda()
-    # layer4 = CachedSelfAttn(K, H, cache_length=128).cuda()
-    # x = torch.randn((B, Tc, H)).cuda()
-
     
-    # ret1 = pipeline(bench_cached, layer0)
-    # print(ret1)
-    # ret2 = pipeline(bench_cached, layer1)
-    # print(ret2)
+    # cache_lengths = [0, Tg // 4] # , Tg // 2, (Tg * 3) // 4, Tg
+    # x = torch.randn((B, Tc, H)).cuda()
+    # for cache_length in cache_lengths:
+    #     print(f"Tc {Tc} cache_length {cache_length}")
+    #     layer = CachedSelfAttn(K, H, cache_length=cache_length).cuda()
+    #     ret = pipeline(bench_cached, layer)
+    #     print(ret)
 
+    d = {}
+    Tcs = [128, 256, 512] # 128, 256, 512, 1024
+    B, K, _, H = (16, 12, 128, 768)
+    for Tc in Tcs:
+        Tg = Tc 
+        layer0 = CachedSelfAttn(K, H, cache_length=0).cuda()
+        layer1 = CachedSelfAttn(K, H, cache_length=0.25 * Tg).cuda()
+        layer2 = CachedSelfAttn(K, H, cache_length=0.5 * Tg).cuda()
+        layer3 = CachedSelfAttn(K, H, cache_length=0.75 * Tg).cuda()
+        layer4 = CachedSelfAttn(K, H, cache_length=Tg).cuda()
+        x = torch.randn((B, Tc, H)).cuda()
+
+        ret0 = pipeline(bench_cached, layer0)
+        d[f"Tc={Tc} Tg={Tg} cache_length={0}"] = ret0
+
+        ret1 = pipeline(bench_cached, layer1)
+        d[f"Tc={Tc} Tg={Tg} cache_length={0.25 * Tg}"] = ret1
+
+        ret2 = pipeline(bench_cached, layer2)
+        d[f"Tc={Tc} Tg={Tg} cache_length={0.5 * Tg}"] = ret2
+
+        ret3 = pipeline(bench_cached, layer3)
+        d[f"Tc={Tc} Tg={Tg} cache_length={0.75 * Tg}"] = ret3
+
+        ret4 = pipeline(bench_cached, layer4)
+        d[f"Tc={Tc} Tg={Tg} cache_length={Tg}"] = ret4
+
+    print(d)
+    df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(MB)", "mem_std(MB)"])
+    print(df)
+    df.to_csv("mem_selfattn.csv")
 
     ############################################################## Works
     # B, K, Tc, H = (16, 12, 128, 768)
