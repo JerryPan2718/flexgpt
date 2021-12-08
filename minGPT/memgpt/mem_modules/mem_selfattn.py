@@ -172,7 +172,7 @@ def pipeline(benchmark_function, module):
             total_time.append(ret[0])    
             mem_usage += ret[1]
 
-        return np.round([np.mean(total_time), np.std(total_time), np.mean(mem_usage) / 10 ** 6, np.std(mem_usage) / 10 ** 6], 3)
+        return [np.mean(total_time), np.std(total_time), np.mean(mem_usage) / 10 ** 6, np.std(mem_usage) / 10 ** 6]
 
 
 if __name__ == "__main__":
