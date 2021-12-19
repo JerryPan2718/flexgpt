@@ -177,7 +177,7 @@ def pipeline(benchmark_function, module):
                     ret = benchmark_function(module, x, Tg)
                     total_time.append(ret[0])    
                     mem_usage += ret[1]
-                prof.export_chrome_trace(f"trace-token_length={x.size(2)} mem_length={module.cache_length}.json")
+                prof.export_chrome_trace(f"trace-token_length={x.size(1)} mem_length={module.cache_length}.json")
 
             else:
                 ret = benchmark_function(module, x, Tg)
