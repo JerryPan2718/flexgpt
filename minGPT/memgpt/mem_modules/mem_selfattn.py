@@ -14,8 +14,9 @@ from torch.profiler import profile, record_function, ProfilerActivity
 import logging
 logging.basicConfig(level=logging.DEBUG)
 
+CUDA_VISIBLE_DEVICES = 1
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-CUDA_VISIBLE_DEVICES = ""
+print(device)
 
 class CachedSelfAttn(CachedModule):
     def __init__(self, n_head, n_hidden, dropout=0.1, max_t=2048, cache_length=64):
