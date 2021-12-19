@@ -9,9 +9,13 @@ import torch.nn as nn
 from torch.nn import functional as F
 from tqdm import tqdm
 import torch.cuda.profiler as profiler
+from torch.profiler import profile, record_function, ProfilerActivity
+
 import logging
 logging.basicConfig(level=logging.DEBUG)
 
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+CUDA_VISIBLE_DEVICES = ""
 
 class CachedSelfAttn(CachedModule):
     def __init__(self, n_head, n_hidden, dropout=0.1, max_t=2048, cache_length=64):
@@ -129,7 +133,7 @@ class CachedSelfAttn(CachedModule):
 
 ### Helper function for Benchmark ###
 def bench_cached(module, x, n_gen):
-        x = x.cuda()
+        x = x.to(device)
         B, T, H = x.shape
         mem_usage = []
         module.clear_cache()
@@ -137,14 +141,14 @@ def bench_cached(module, x, n_gen):
         with torch.inference_mode():
             with PytorchTimer(verbose=False) as t:
                 for i in range(1, n_gen + 1):
-                    y = check_shape(module(x.cuda()), x.shape)
-                    y_new = torch.randn((B, 1, H)).cuda()
-                    x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
+                    y = check_shape(module(x.to(device)), x.shape)
+                    y_new = torch.randn((B, 1, H)).to(device)
+                    x = check_shape(torch.cat((y, y_new), dim=-2).to(device), (B, T + i, H))
                     mem_usage.append(torch.cuda.memory_allocated())
         return t.elapsed, mem_usage
 
 def bench_uncached(module, x, n_gen):
-    x = x.cuda()
+    x = x.to(device)
     B, T, H = x.shape
     mem_usage = []
     module.clear_cache()
@@ -153,9 +157,9 @@ def bench_uncached(module, x, n_gen):
         with PytorchTimer(verbose=False) as t:
             for i in range(1, n_gen + 1):
                 module.clear_cache()
-                y = check_shape(module(x.cuda()), x.shape)
-                y_new = torch.randn((B, 1, H)).cuda()
-                x = check_shape(torch.cat((y, y_new), dim=-2).cuda(), (B, T + i, H))
+                y = check_shape(module(x.to(device)), x.shape)
+                y_new = torch.randn((B, 1, H)).to(device)
+                x = check_shape(torch.cat((y, y_new), dim=-2).to(device), (B, T + i, H))
                 mem_usage.append(torch.cuda.memory_allocated())
     return t.elapsed, mem_usage
 
@@ -167,67 +171,53 @@ def pipeline(benchmark_function, module):
         # bench
         total_time = []
         mem_usage = []
+        print(module.cache_length)
         for i in tqdm(range(8)):
-            ret = benchmark_function(module, x, Tg)
-            total_time.append(ret[0])    
-            mem_usage += ret[1]
+            if i == 7:
+                with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+                    ret = benchmark_function(module, x, Tg)
+                    total_time.append(ret[0])    
+                    mem_usage += ret[1]
+                prof.export_chrome_trace(f"trace-{module.cache_length}.json")
+
+            else:
+                ret = benchmark_function(module, x, Tg)
+                total_time.append(ret[0])    
+                mem_usage += ret[1]
+        
 
         return [np.mean(total_time), np.std(total_time), np.mean(mem_usage) / 10 ** 6, np.std(mem_usage) / 10 ** 6]
 
 
 if __name__ == "__main__":
-    # d = {}
-    # Tcs = [128] # 128, 256, 512, 1024
-    # B, K, H = (48, 8, 1600)
-    # for Tc in Tcs:
-    #     Tg = Tc 
-    #     cache_lengths = [0, Tg // 4, Tg // 2, (Tg * 3) // 4, Tg]
-    #     x = torch.randn((B, Tc, H)).cuda()
-    #     for cache_length in cache_lengths:
-    #         print(f"Tc {Tc} cache_length {cache_length}")
-    #         layer = CachedSelfAttn(K, H, cache_length=cache_length).cuda()
-    #         ret = pipeline(bench_cached, layer)
-    #         d[f"Tc={Tc} Tg={Tg} cache_length={cache_length}"] = ret
-    #         print(ret)
-
-
-    # df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(MB)", "mem_std(MB)"])
-    # print(df)
-    # df.to_csv("mem_selfattn.csv")
-
-    
-    # cache_lengths = [0, Tg // 4] # , Tg // 2, (Tg * 3) // 4, Tg
-    # x = torch.randn((B, Tc, H)).cuda()
-    # for cache_length in cache_lengths:
-    #     print(f"Tc {Tc} cache_length {cache_length}")
-    #     layer = CachedSelfAttn(K, H, cache_length=cache_length).cuda()
-    #     ret = pipeline(bench_cached, layer)
-    #     print(ret)
-
     d = {}
-    Tcs = [128, 256, 512] # 128, 256, 512, 1024
+    Tcs = [128] # 128, 256, 512, 1024
     B, K, _, H = (16, 12, 128, 768)
     for Tc in Tcs:
         Tg = Tc 
-        layer0 = CachedSelfAttn(K, H, cache_length=0).cuda()
-        layer1 = CachedSelfAttn(K, H, cache_length=0.25 * Tg).cuda()
-        layer2 = CachedSelfAttn(K, H, cache_length=0.5 * Tg).cuda()
-        layer3 = CachedSelfAttn(K, H, cache_length=0.75 * Tg).cuda()
-        layer4 = CachedSelfAttn(K, H, cache_length=Tg).cuda()
-        x = torch.randn((B, Tc, H)).cuda()
+        layer0 = CachedSelfAttn(K, H, cache_length=0).to(device)
+        layer1 = CachedSelfAttn(K, H, cache_length=0.25 * Tg).to(device)
+        layer2 = CachedSelfAttn(K, H, cache_length=0.5 * Tg).to(device)
+        layer3 = CachedSelfAttn(K, H, cache_length=0.75 * Tg).to(device)
+        layer4 = CachedSelfAttn(K, H, cache_length=Tg).to(device)
 
+        x = torch.randn((B, Tc, H)).to(device)
         ret0 = pipeline(bench_cached, layer0)
         d[f"Tc={Tc} Tg={Tg} cache_length={0}"] = ret0
 
+        x = torch.randn((B, Tc, H)).to(device)
         ret1 = pipeline(bench_cached, layer1)
         d[f"Tc={Tc} Tg={Tg} cache_length={0.25 * Tg}"] = ret1
 
+        x = torch.randn((B, Tc, H)).to(device)
         ret2 = pipeline(bench_cached, layer2)
         d[f"Tc={Tc} Tg={Tg} cache_length={0.5 * Tg}"] = ret2
 
+        x = torch.randn((B, Tc, H)).to(device)
         ret3 = pipeline(bench_cached, layer3)
         d[f"Tc={Tc} Tg={Tg} cache_length={0.75 * Tg}"] = ret3
 
+        x = torch.randn((B, Tc, H)).to(device)
         ret4 = pipeline(bench_cached, layer4)
         d[f"Tc={Tc} Tg={Tg} cache_length={Tg}"] = ret4
 
