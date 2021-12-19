@@ -171,14 +171,13 @@ def pipeline(benchmark_function, module):
         # bench
         total_time = []
         mem_usage = []
-        print(module.cache_length)
         for i in tqdm(range(8)):
             if i == 7:
                 with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
                     ret = benchmark_function(module, x, Tg)
                     total_time.append(ret[0])    
                     mem_usage += ret[1]
-                prof.export_chrome_trace(f"trace-{module.cache_length}.json")
+                prof.export_chrome_trace(f"trace-token_length={x.size(2)} mem_length={module.cache_length}.json")
 
             else:
                 ret = benchmark_function(module, x, Tg)
@@ -191,7 +190,7 @@ def pipeline(benchmark_function, module):
 
 if __name__ == "__main__":
     d = {}
-    Tcs = [128] # 128, 256, 512, 1024
+    Tcs = [128, 256, 512] # 128, 256, 512, 1024
     B, K, _, H = (16, 12, 128, 768)
     for Tc in Tcs:
         Tg = Tc 
