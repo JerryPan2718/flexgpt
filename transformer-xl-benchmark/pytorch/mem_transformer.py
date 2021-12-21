@@ -745,7 +745,8 @@ class MemTransformerLM(nn.Module):
         hidden, new_mems = self._forward(data, mems=mems)
 
         pred_hid = hidden[-tgt_len:]
-        if self.sample_softmax > 0 and self.training:
+        # if self.sample_softmax > 0 and self.training:
+        if self.sample_softmax > 0:
             assert self.tie_weight
             logit = sample_logits(self.word_emb,
                 self.out_layer.bias, target, pred_hid, self.sampler)
