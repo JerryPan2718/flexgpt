@@ -2,6 +2,7 @@ from utils import check_shape, CachedModule, PytorchTimer
 import torch
 import torch.nn as nn
 import logging
+# from pthflops import count_ops
 logging.basicConfig(level=logging.DEBUG)
 
 
@@ -37,33 +38,26 @@ if __name__ == "__main__":
     x = torch.randn((B, T, H))
     with PytorchTimer(verbose=True):
         y = check_shape(layer(x), (B, T, H))
+        FLOP_count = int(str(count_ops(layer, x)[0]).split(" ")[-1])
+        print(FLOP_count)
 
-    layer.clear_cache()
-    x = torch.randn((B, T, H))
-    with PytorchTimer(verbose=True):
-        y = check_shape(layer(x), (B, T, H))
-
-    layer.clear_cache()
-    x = torch.randn((B, T, H))
-    with PytorchTimer(verbose=True):
-        y = check_shape(layer(x), (B, T, H))
-
-    layer.clear_cache()
-    x = torch.randn((B, T, H))
-    with PytorchTimer(verbose=True):
-        y = check_shape(layer(x), (B, T, H))
-
-    logging.debug(f"test cache")
-    for i in range(1, 10):
-        x = torch.randn((B, T + i, H))
-        with PytorchTimer(verbose=True):
-            y = check_shape(layer(x), (B, T + i, H))
-
-    # x = torch.randn((B, T + 2, H))
+    # layer.clear_cache()
+    # x = torch.randn((B, T, H))
     # with PytorchTimer(verbose=True):
-    #     y = check_shape(layer(x), (B, T + 2, H))
+    #     y = check_shape(layer(x), (B, T, H))
 
-    # x = torch.randn((B, T + 3, H))
+    # layer.clear_cache()
+    # x = torch.randn((B, T, H))
     # with PytorchTimer(verbose=True):
-    #     y = check_shape(layer(x), (B, T + 3, H))
-        
+    #     y = check_shape(layer(x), (B, T, H))
+
+    # layer.clear_cache()
+    # x = torch.randn((B, T, H))
+    # with PytorchTimer(verbose=True):
+    #     y = check_shape(layer(x), (B, T, H))
+
+    # logging.debug(f"test cache")
+    # for i in range(1, 10):
+    #     x = torch.randn((B, T + i, H))
+    #     with PytorchTimer(verbose=True):
+    #         y = check_shape(layer(x), (B, T + i, H))

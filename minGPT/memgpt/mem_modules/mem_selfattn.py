@@ -10,6 +10,12 @@ from torch.nn import functional as F
 from tqdm import tqdm
 import torch.cuda.profiler as profiler
 from torch.profiler import profile, record_function, ProfilerActivity
+from pypapi import papi_high as high
+from pypapi import events as papi_events
+
+# from papi import events, papi_high as high
+# from thop import profile
+
 
 import logging
 logging.basicConfig(level=logging.DEBUG)
@@ -134,22 +140,25 @@ class CachedSelfAttn(CachedModule):
 
 ### Helper function for Benchmark ###
 def bench_cached(module, x, n_gen):
-        x = x.to(device)
-        B, T, H = x.shape
-        mem_usage = []
-        module.clear_cache()
-        module.reset_cache_counter()
-        with torch.inference_mode():
-            with PytorchTimer(verbose=False) as t:
-                for i in range(1, n_gen + 1):
-                    y = check_shape(module(x.to(device)), x.shape)
-                    y_new = torch.randn((B, 1, H)).to(device)
-                    x = check_shape(torch.cat((y, y_new), dim=-2).to(device), (B, T + i, H))
-                    mem_usage.append(torch.cuda.memory_allocated())
-        return t.elapsed, mem_usage
+    x = x.to(device)
+    x_copy = x[:]
+    B, T, H = x.shape
+    mem_usage = []
+    module.clear_cache()
+    module.reset_cache_counter()
+    with torch.inference_mode():
+        with PytorchTimer(verbose=False) as t:
+            for i in range(1, n_gen + 1):
+                y = check_shape(module(x.to(device)), x.shape)
+                y_new = torch.randn((B, 1, H)).to(device)
+                x = check_shape(torch.cat((y, y_new), dim=-2).to(device), (B, T + i, H))
+                mem_usage.append(torch.cuda.memory_allocated())
+    # FLOP_count = int(str(count_ops(module, x_copy)[0]).split(" ")[-1])
+    return t.elapsed, mem_usage
 
 def bench_uncached(module, x, n_gen):
     x = x.to(device)
+    x_copy = x[:]
     B, T, H = x.shape
     mem_usage = []
     module.clear_cache()
@@ -162,6 +171,7 @@ def bench_uncached(module, x, n_gen):
                 y_new = torch.randn((B, 1, H)).to(device)
                 x = check_shape(torch.cat((y, y_new), dim=-2).to(device), (B, T + i, H))
                 mem_usage.append(torch.cuda.memory_allocated())
+    # FLOP_count = int(str(count_ops(module, x_copy)[0]).split(" ")[-1])
     return t.elapsed, mem_usage
 
 def pipeline(benchmark_function, module):
@@ -172,20 +182,24 @@ def pipeline(benchmark_function, module):
         # bench
         total_time = []
         mem_usage = []
+        # FLOP = []
         for i in tqdm(range(8)):
             if i == 7:
                 with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+                    high.start_counters([papi_events.PAPI_FP_OPS,])
                     ret = benchmark_function(module, x, Tg)
                     total_time.append(ret[0])    
                     mem_usage += ret[1]
-                prof.export_chrome_trace(f"trace-token_length={x.size(1)} mem_length={module.cache_length}.json")
+                    FLOP = high.stop_counters()
+                    # FLOP = ret[2]
+                # prof.export_chrome_trace(f"trace-token_length={x.size(1)} mem_length={module.cache_length}.json")
 
             else:
                 ret = benchmark_function(module, x, Tg)
                 total_time.append(ret[0])    
                 mem_usage += ret[1]
         
-
+        
         return [np.mean(total_time), np.std(total_time), np.mean(mem_usage) / 10 ** 6, np.std(mem_usage) / 10 ** 6]
 
 
@@ -203,6 +217,7 @@ if __name__ == "__main__":
 
         x = torch.randn((B, Tc, H)).to(device)
         ret0 = pipeline(bench_cached, layer0)
+        print(ret0)
         d[f"Tc={Tc} Tg={Tg} cache_length={0}"] = ret0
 
         x = torch.randn((B, Tc, H)).to(device)
@@ -222,7 +237,7 @@ if __name__ == "__main__":
         d[f"Tc={Tc} Tg={Tg} cache_length={Tg}"] = ret4
 
     print(d)
-    df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(MB)", "mem_std(MB)"])
+    df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(MB)", "mem_std(MB)", "FLOPs"])
     print(df)
     df.to_csv("mem_selfattn.csv")
 
