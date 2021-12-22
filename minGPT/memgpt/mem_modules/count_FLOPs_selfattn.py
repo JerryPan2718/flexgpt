@@ -11,7 +11,7 @@ TD = 10
 # 762M: 36, 1280
 # 1542M: 48, 1600
 B, H = (24, 1024)
-K, Tc, Tg = (8, 128, 128)
+K, Tc, Tg = (8, 128, 1024)
 
 #### Calculation
 M = 2 * B * Tc ** 3 * MM + B * Tc ** 2 * MFS + sum([2 * B * (Tc + i) ** 2 * MM + 2 * B * (Tc + i) ** 2 * ZSC + B * (Tc + i) ** 2 * MFS for i in range(1, Tg)])

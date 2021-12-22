@@ -194,7 +194,7 @@ def pipeline(benchmark_function, module):
 
 if __name__ == "__main__":
     d = {}
-    Tcs = [2048, 1024, 512, 256, 128] # 128, 256, 512, 1024
+    Tcs = [1024, 512, 256, 128] # 128, 256, 512, 1024
     B, K, _, H = (2, 4, 128, 128)
     for Tc in Tcs:
         Tg = Tc 
@@ -232,7 +232,7 @@ if __name__ == "__main__":
     print(d)
     df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(MB)", "mem_std(MB)"])
     print(df)
-    df.to_csv("mem_selfattn_1542M.csv")
+    df.to_csv("mem_selfattn.csv")
 
     ############################################################## Works
     # B, K, Tc, H = (16, 12, 128, 768)
