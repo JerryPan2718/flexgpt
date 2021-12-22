@@ -10,11 +10,8 @@ from torch.nn import functional as F
 from tqdm import tqdm
 import torch.cuda.profiler as profiler
 from torch.profiler import profile, record_function, ProfilerActivity
-from pypapi import papi_high as high
-from pypapi import events as papi_events
-
-# from papi import events, papi_high as high
-# from thop import profile
+# from pypapi import papi_high as high
+# from pypapi import events as papi_events
 
 
 import logging
@@ -97,7 +94,7 @@ class CachedSelfAttn(CachedModule):
         qkt = torch.zeros(B, K, T, T, device=x.device)
         qkt[:, :, :-1, :-1] = qkt_cached
 
-        # qkt: BKT(H/K) * BKT(H/K).T -> BKTT
+        # qkt: BK1(H/K) * BK(H/K)T -> BK1T
         qkt[:, :, -1:, :] = q[:, :, -1:, :] @ k.transpose(-2, -1)
         attn = qkt * (1.0 / math.sqrt(k.size(-1)))
         attn = attn.to(x.device)
@@ -122,18 +119,16 @@ class CachedSelfAttn(CachedModule):
         qkt_cached = self.get_cache("qkt", device=x.device)
         y_cached = self.get_cache("y", device=x.device)
 
-        # print(self.cache_counter)
         if (y_cached is None or qkt_cached is None) or self.cache_counter >= self.cache_length:
             self.clear_cache()
             qkt, y = self.forward_uncached(x)
             self.set_cache("qkt", check_shape(qkt, (B, K, T, T)))
             self.set_cache("y", check_shape(y, (B, K, T, H // K)))
-            # print(f"{self.cache_counter} is uncached")
         else:
             qkt, y = self.forward_cached(x, qkt_cached, y_cached)
             self.set_cache("qkt", check_shape(qkt, (B, K, T, T)))
             self.set_cache("y", check_shape(y, (B, K, T, H // K)))
-            # print(f"{self.cache_counter} is cached")
+
         y = y.transpose(1, 2).contiguous().view(B, T, H)
         self.cache_counter += 1
         return y
@@ -141,7 +136,6 @@ class CachedSelfAttn(CachedModule):
 ### Helper function for Benchmark ###
 def bench_cached(module, x, n_gen):
     x = x.to(device)
-    x_copy = x[:]
     B, T, H = x.shape
     mem_usage = []
     module.clear_cache()
@@ -153,12 +147,10 @@ def bench_cached(module, x, n_gen):
                 y_new = torch.randn((B, 1, H)).to(device)
                 x = check_shape(torch.cat((y, y_new), dim=-2).to(device), (B, T + i, H))
                 mem_usage.append(torch.cuda.memory_allocated())
-    # FLOP_count = int(str(count_ops(module, x_copy)[0]).split(" ")[-1])
     return t.elapsed, mem_usage
 
 def bench_uncached(module, x, n_gen):
     x = x.to(device)
-    x_copy = x[:]
     B, T, H = x.shape
     mem_usage = []
     module.clear_cache()
@@ -171,7 +163,6 @@ def bench_uncached(module, x, n_gen):
                 y_new = torch.randn((B, 1, H)).to(device)
                 x = check_shape(torch.cat((y, y_new), dim=-2).to(device), (B, T + i, H))
                 mem_usage.append(torch.cuda.memory_allocated())
-    # FLOP_count = int(str(count_ops(module, x_copy)[0]).split(" ")[-1])
     return t.elapsed, mem_usage
 
 def pipeline(benchmark_function, module):
@@ -184,20 +175,18 @@ def pipeline(benchmark_function, module):
         mem_usage = []
         # FLOP = []
         for i in tqdm(range(8)):
-            if i == 7:
-                with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
-                    high.start_counters([papi_events.PAPI_FP_OPS,])
-                    ret = benchmark_function(module, x, Tg)
-                    total_time.append(ret[0])    
-                    mem_usage += ret[1]
-                    FLOP = high.stop_counters()
-                    # FLOP = ret[2]
-                # prof.export_chrome_trace(f"trace-token_length={x.size(1)} mem_length={module.cache_length}.json")
+            # if i == 7:
+            #     with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            #         ret = benchmark_function(module, x, Tg)
+            #         total_time.append(ret[0])    
+            #         mem_usage += ret[1]
+            #         # FLOP = ret[2]
+            #     # prof.export_chrome_trace(f"trace-token_length={x.size(1)} mem_length={module.cache_length}.json")
 
-            else:
-                ret = benchmark_function(module, x, Tg)
-                total_time.append(ret[0])    
-                mem_usage += ret[1]
+            # else:
+            ret = benchmark_function(module, x, Tg)
+            total_time.append(ret[0])    
+            mem_usage += ret[1]
         
         
         return [np.mean(total_time), np.std(total_time), np.mean(mem_usage) / 10 ** 6, np.std(mem_usage) / 10 ** 6]
@@ -205,8 +194,8 @@ def pipeline(benchmark_function, module):
 
 if __name__ == "__main__":
     d = {}
-    Tcs = [128, 256, 512] # 128, 256, 512, 1024
-    B, K, _, H = (16, 12, 128, 768)
+    Tcs = [512, 256, 128] # 128, 256, 512, 1024
+    B, K, _, H = (36, 4, 128, 1280)
     for Tc in Tcs:
         Tg = Tc 
         layer0 = CachedSelfAttn(K, H, cache_length=0).to(device)
@@ -217,29 +206,33 @@ if __name__ == "__main__":
 
         x = torch.randn((B, Tc, H)).to(device)
         ret0 = pipeline(bench_cached, layer0)
-        print(ret0)
         d[f"Tc={Tc} Tg={Tg} cache_length={0}"] = ret0
+        torch.cuda.empty_cache()
 
         x = torch.randn((B, Tc, H)).to(device)
         ret1 = pipeline(bench_cached, layer1)
         d[f"Tc={Tc} Tg={Tg} cache_length={0.25 * Tg}"] = ret1
+        torch.cuda.empty_cache()
 
         x = torch.randn((B, Tc, H)).to(device)
         ret2 = pipeline(bench_cached, layer2)
         d[f"Tc={Tc} Tg={Tg} cache_length={0.5 * Tg}"] = ret2
+        torch.cuda.empty_cache()
 
         x = torch.randn((B, Tc, H)).to(device)
         ret3 = pipeline(bench_cached, layer3)
         d[f"Tc={Tc} Tg={Tg} cache_length={0.75 * Tg}"] = ret3
+        torch.cuda.empty_cache()
 
         x = torch.randn((B, Tc, H)).to(device)
         ret4 = pipeline(bench_cached, layer4)
         d[f"Tc={Tc} Tg={Tg} cache_length={Tg}"] = ret4
+        torch.cuda.empty_cache()
 
     print(d)
-    df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(MB)", "mem_std(MB)", "FLOPs"])
+    df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(MB)", "mem_std(MB)"])
     print(df)
-    df.to_csv("mem_selfattn.csv")
+    df.to_csv("mem_selfattn_1542M.csv")
 
     ############################################################## Works
     # B, K, Tc, H = (16, 12, 128, 768)

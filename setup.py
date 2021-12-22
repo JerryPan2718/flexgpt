@@ -13,6 +13,8 @@ setup(
         "transformers",
         "loguru",
         "pandas",
+        "pthflops",
+        "python_papi",
     ],
     extras_require={"test": ["pytest", "tensorflow", "matplotlib", "graphviz"]},
 )
