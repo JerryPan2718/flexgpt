@@ -194,8 +194,8 @@ def pipeline(benchmark_function, module):
 
 if __name__ == "__main__":
     d = {}
-    Tcs = [512, 256, 128] # 128, 256, 512, 1024
-    B, K, _, H = (36, 4, 128, 1280)
+    Tcs = [2048, 1024, 512, 256, 128] # 128, 256, 512, 1024
+    B, K, _, H = (2, 4, 128, 128)
     for Tc in Tcs:
         Tg = Tc 
         layer0 = CachedSelfAttn(K, H, cache_length=0).to(device)
