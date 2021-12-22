@@ -5,11 +5,23 @@ logging.basicConfig(level=logging.DEBUG)
 
 
 def check_shape(x, shape):
-    # if x.shape != shape:
-        # logging.critical(f"Tensor shape {x.shape} does not match expected {shape}")
-        # assert False
+    if x.shape != shape:
+        logging.critical(f"Tensor shape {x.shape} does not match expected {shape}")
+        assert False
     return x
 
+class FLOPsCounters(object):
+    def __enter__(self):
+        self.FLOPs = 0
+
+    def __add__(self):
+        self.FLOPs += 1
+    
+    def __multplipy__(self):
+        self.FLOPs += 1
+    
+    def __exit__(self):
+        print(self.FLOPs)
 
 class PytorchTimer(object):
     def __init__(self, verbose=False):
