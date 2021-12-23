@@ -66,23 +66,23 @@ class CachedSelfAttn(CachedModule):
         B, T, H = x.size()
         K = self.n_head
         
-        with PytorchTimer(verbose=False) as t:
+        with PytorchTimer(verbose=False) as T1:
             q = self.q(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
             k = self.k(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
             v = self.v(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
-        t1 = t.elapsed
+        t1 = T1.elapsed
 
-        with PytorchTimer(verbose=False) as t:
+        with PytorchTimer(verbose=False) as T2:
             qkt = q @ k.transpose(-2, -1) 
             att = qkt * (1.0 / math.sqrt(k.size(-1)))
-        t2 = t.elapsed
+        t2 = T2.elapsed
         # attn = attn.to(x.device)
-        with PytorchTimer(verbose=False) as t:
+        with PytorchTimer(verbose=False) as T3:
             mask = self.mask[:, :, :T, :T].to(x.device)
             att = att.masked_fill(mask == 0, float('-inf'))
             att = F.softmax(att, dim=-1)
             y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
-        t3 = t.elapsed
+        t3 = T3.elapsed
         return qkt, y, t1, t2, t3
     
     def forward_cached(self, x, qkt_cached, y_cached):
@@ -92,23 +92,23 @@ class CachedSelfAttn(CachedModule):
         qkt_cached = check_shape(qkt_cached, (B, K, T - 1, T - 1))
         y_cached = check_shape(y_cached, (B, K, T - 1, H // K))
 
-        with PytorchTimer(verbose=False) as t:
+        with PytorchTimer(verbose=False) as T1:
             q = self.q(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
             k = self.k(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
             v = self.v(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
 
             qkt = torch.zeros(B, K, T, T, device=x.device)
             qkt[:, :, :-1, :-1] = qkt_cached
-        t1 = t.elapsed
+        t1 = T1.elapsed
 
         # qkt: BK1(H/K) * BK(H/K)T -> BK1T
-        with PytorchTimer(verbose=False) as t:
+        with PytorchTimer(verbose=False) as T2:
             qkt[:, :, -1:, :] = q[:, :, -1:, :] @ k.transpose(-2, -1)
             attn = qkt * (1.0 / math.sqrt(k.size(-1)))
             attn = attn.to(x.device)
-        t2 = t.elapsed
+        t2 = T2.elapsed
 
-        with PytorchTimer(verbose=False) as t:
+        with PytorchTimer(verbose=False) as T3:
             mask = self.mask[:, :, :T, :T].to(x.device)
             attn = attn.masked_fill(mask == 0, float('-inf'))
             attn = F.softmax(attn, dim=-1)
@@ -118,7 +118,7 @@ class CachedSelfAttn(CachedModule):
             y_new = new_attn @ v
             # y: stack(BK1(H/K), BK(T-1)(H/K)) -> BKT(H/K)
             y = torch.cat((y_cached, y_new), dim=-2)
-        t3 = t.elapsed
+        t3 = T3.elapsed
         
         return qkt, y, t1, t2, t3
 
@@ -143,11 +143,14 @@ class CachedSelfAttn(CachedModule):
 
         y = y.transpose(1, 2).contiguous().view(B, T, H)
         self.cache_counter += 1
+        # print(t1, t2, t3)
         return y, t1, t2, t3
 
 ### Helper function for Benchmark ###
 def bench_cached(module, x, n_gen):
-    t1_array = t2_array = t3_array = []
+    t1_array = []
+    t2_array = []
+    t3_array = []
     x = x.to(device)
     B, T, H = x.shape
     mem_usage = []
@@ -156,13 +159,15 @@ def bench_cached(module, x, n_gen):
     with torch.inference_mode():
         with PytorchTimer(verbose=False) as t:
             for i in range(1, n_gen + 1):
-                y, t1, t2, t3 = check_shape(module(x.to(device)), x.shape)
+                y, t1, t2, t3 = module(x.to(device))
+                y = check_shape(y, x.shape)
                 t1_array.append(t1)
                 t2_array.append(t2)
                 t3_array.append(t3)
                 y_new = torch.randn((B, 1, H)).to(device)
                 x = check_shape(torch.cat((y, y_new), dim=-2).to(device), (B, T + i, H))
                 mem_usage.append(torch.cuda.memory_allocated())
+    print(np.sum(t1_array), np.sum(t2_array), np.sum(t3_array))
     return t.elapsed, mem_usage, np.sum(t1_array), np.sum(t2_array), np.sum(t3_array)
 
 def bench_uncached(module, x, n_gen):
@@ -182,7 +187,9 @@ def bench_uncached(module, x, n_gen):
     return t.elapsed, mem_usage
 
 def pipeline(benchmark_function, module):
-        t1_array = t2_array = t3_array = []
+        t1_array = []
+        t2_array = []
+        t3_array = []
         # warmup
         for i in tqdm(range(4)):
             benchmark_function(module, x, Tg)
@@ -208,13 +215,18 @@ def pipeline(benchmark_function, module):
             t2_array.append(ret[3])
             t3_array.append(ret[4])
         
-        return [np.mean(total_time), np.std(total_time), np.mean(mem_usage) / 10 ** 6, np.std(mem_usage) / 10 ** 6, np.mean(t1_array), np.mean(t2_array), np.mean(t3_array), ]
+        return [np.mean(total_time), np.std(total_time), np.mean(mem_usage) / 10 ** 6, np.std(mem_usage) / 10 ** 6, np.mean(t1_array), np.mean(t2_array), np.mean(t3_array)]
 
 
 if __name__ == "__main__":
+    # Parameters: layers, d_model
+    # 117M: 12, 768
+    # 345M: 24, 1024
+    # 762M: 36, 1280
+    # 1542M: 48, 1600
     d = {}
     Tcs = [512, 256, 128] # 128, 256, 512, 1024
-    B, K, _, H = (36, 4, 128, 1280)
+    B, K, _, H = (12, 4, 128, 768)
     for Tc in Tcs:
         Tg = Tc 
         layer0 = CachedSelfAttn(K, H, cache_length=0).to(device)
@@ -251,7 +263,7 @@ if __name__ == "__main__":
     print(d)
     df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(MB)", "mem_std(MB)", "t1_mean(s)", "t2_mean(s)", "t3_mean(s)"])
     print(df)
-    df.to_csv("mem_selfattn.csv")
+    df.to_csv(f"mem_selfattn_117M_K={K}_test.csv")
 
     ############################################################## Works
     # B, K, Tc, H = (16, 12, 128, 768)
