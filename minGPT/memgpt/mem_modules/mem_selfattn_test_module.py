@@ -10,6 +10,9 @@ from torch.nn import functional as F
 from tqdm import tqdm
 import torch.cuda.profiler as profiler
 from torch.profiler import profile, record_function, ProfilerActivity
+import datetime
+
+today = datetime.date.today()
 # from pypapi import papi_high as high
 # from pypapi import events as papi_events
 
@@ -42,7 +45,7 @@ class CachedSelfAttn(CachedModule):
         self.n_hidden = n_hidden
         self.cache_counter = 0
         self.cache_length = cache_length
-        self.zero_pad = torch.zeros(B, K, T, T, device=device)
+        # self.zero_pad = torch.zeros(B, K, T, T, device=device)
     
     def clear_cache(self):
         self.q.clear_cache()
@@ -98,8 +101,8 @@ class CachedSelfAttn(CachedModule):
             k = self.k(x).view(B, T, K, H // K).transpose(1, 2)
             v = self.v(x).view(B, T, K, H // K).transpose(1, 2)
 
-            qkt = self.zero_pad[:B, :K, :T, :T]
-            # torch.zeros(B, K, T, T, device=x.device)
+            # qkt = self.zero_pad[:B, :K, :T, :T]
+            qkt = torch.zeros(B, K, T, T, device=x.device)
             qkt[:, :, :T-1, :T-1] = qkt_cached
         t1 = T1.elapsed
 
@@ -110,12 +113,12 @@ class CachedSelfAttn(CachedModule):
             attn = attn.to(x.device)
         t2 = T2.elapsed
 
+        
+        mask = self.mask[:, :, :T, :T].to(x.device)
+        attn = attn.masked_fill(mask == 0, float('-inf'))
+        attn = F.softmax(attn, dim=-1)
+        new_attn = attn[:, :, -1:, :]
         with PytorchTimer(verbose=False) as T3:
-            mask = self.mask[:, :, :T, :T].to(x.device)
-            attn = attn.masked_fill(mask == 0, float('-inf'))
-            attn = F.softmax(attn, dim=-1)
-            new_attn = attn[:, :, -1:, :]
-
             # y_new: BK1T * BKT(H/K) -> BK1(H/K)
             y_new = new_attn @ v
             # y: stack(BK1(H/K), BK(T-1)(H/K)) -> BKT(H/K)
@@ -271,7 +274,7 @@ if __name__ == "__main__":
         print(d)
         df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(MB)", "mem_std(MB)", "t1_mean(s)", "t1_std(s)", "t2_mean(s)", "t2_std(s)","t3_mean(s)", "t3_std(s)"])
         print(df)
-        df.to_csv(f"logs/mem_selfattn_{model_size}_K={K}_test_zeropad_nograd_AMP.csv")
+        df.to_csv(f"logs/{today}-mem_selfattn_{model_size}_K={K}_test_nograd_AMP.csv")
     print(time.time() - start)
     ############################################################## Works
     # B, K, Tc, H = (16, 12, 128, 768)
