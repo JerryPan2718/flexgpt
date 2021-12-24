@@ -22,7 +22,7 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print(device)
 
 class CachedSelfAttn(CachedModule):
-    def __init__(self, n_head, n_hidden, dropout=0.1, max_t=2048, cache_length=64):
+    def __init__(self, n_head, n_hidden, dropout=0.1, max_t=2048, cache_length=64, B=12, T=2048):
         """
         q: BKT(H/K)
         k: BKT(H/K)
@@ -42,6 +42,7 @@ class CachedSelfAttn(CachedModule):
         self.n_hidden = n_hidden
         self.cache_counter = 0
         self.cache_length = cache_length
+        self.zero_pad = torch.zeros(B, K, T, T, device=device)
     
     def clear_cache(self):
         self.q.clear_cache()
@@ -67,9 +68,9 @@ class CachedSelfAttn(CachedModule):
         K = self.n_head
         
         with PytorchTimer(verbose=False) as T1:
-            q = self.q(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
-            k = self.k(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
-            v = self.v(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
+            q = self.q(x).view(B, T, K, H // K).transpose(1, 2)
+            k = self.k(x).view(B, T, K, H // K).transpose(1, 2)
+            v = self.v(x).view(B, T, K, H // K).transpose(1, 2)
         t1 = T1.elapsed
 
         with PytorchTimer(verbose=False) as T2:
@@ -93,12 +94,13 @@ class CachedSelfAttn(CachedModule):
         y_cached = check_shape(y_cached, (B, K, T - 1, H // K))
 
         with PytorchTimer(verbose=False) as T1:
-            q = self.q(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
-            k = self.k(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
-            v = self.v(x).view(B, T, self.n_head, H // self.n_head).transpose(1, 2)
+            q = self.q(x).view(B, T, K, H // K).transpose(1, 2)
+            k = self.k(x).view(B, T, K, H // K).transpose(1, 2)
+            v = self.v(x).view(B, T, K, H // K).transpose(1, 2)
 
-            qkt = torch.zeros(B, K, T, T, device=x.device)
-            qkt[:, :, :-1, :-1] = qkt_cached
+            qkt = self.zero_pad[:B, :K, :T, :T]
+            # torch.zeros(B, K, T, T, device=x.device)
+            qkt[:, :, :T-1, :T-1] = qkt_cached
         t1 = T1.elapsed
 
         # qkt: BK1(H/K) * BK(H/K)T -> BK1T
@@ -215,7 +217,7 @@ def pipeline(benchmark_function, module):
             t2_array.append(ret[3])
             t3_array.append(ret[4])
         
-        return [np.mean(total_time), np.std(total_time), np.mean(mem_usage) / 10 ** 6, np.std(mem_usage) / 10 ** 6, np.mean(t1_array), np.mean(t2_array), np.mean(t3_array)]
+        return [np.mean(total_time), np.std(total_time), np.mean(mem_usage) / 10 ** 6, np.std(mem_usage) / 10 ** 6, np.mean(t1_array), np.std(t1_array), np.mean(t2_array), np.std(t2_array), np.mean(t3_array), np.std(t3_array)]
 
 
 if __name__ == "__main__":
@@ -224,47 +226,53 @@ if __name__ == "__main__":
     # 345M: 24, 1024
     # 762M: 36, 1280
     # 1542M: 48, 1600
-    d = {}
-    Tcs = [512, 256, 128] # 128, 256, 512, 1024
-    B, K, _, H = (12, 4, 128, 768)
-    for Tc in Tcs:
-        Tg = Tc 
-        layer0 = CachedSelfAttn(K, H, cache_length=0).to(device)
-        layer1 = CachedSelfAttn(K, H, cache_length=0.25 * Tg).to(device)
-        layer2 = CachedSelfAttn(K, H, cache_length=0.5 * Tg).to(device)
-        layer3 = CachedSelfAttn(K, H, cache_length=0.75 * Tg).to(device)
-        layer4 = CachedSelfAttn(K, H, cache_length=Tg).to(device)
+    hparams = {"117M": (12, 768), "345M": (24, 1024), "762M": (36, 1280), "1542M": (48, 1600)}
+    start = time.time()
+    for model_size, hparam in hparams.items():
+        with torch.no_grad():
+            with torch.autocast(device):
+                d = {}
+                Tcs = [512, 256, 128] # 128, 256, 512, 1024
+                K = 4
+                B, H = hparam
+                for Tc in Tcs:
+                    Tg = Tc 
+                    layer0 = CachedSelfAttn(K, H, cache_length=0, B=B, T=Tc+Tg).to(device)
+                    layer1 = CachedSelfAttn(K, H, cache_length=0.25 * Tg, B=B, T=Tc+Tg).to(device)
+                    layer2 = CachedSelfAttn(K, H, cache_length=0.5 * Tg, B=B, T=Tc+Tg).to(device)
+                    layer3 = CachedSelfAttn(K, H, cache_length=0.75 * Tg, B=B, T=Tc+Tg).to(device)
+                    layer4 = CachedSelfAttn(K, H, cache_length=Tg, B=B, T=Tc+Tg).to(device)
 
-        x = torch.randn((B, Tc, H)).to(device)
-        ret0 = pipeline(bench_cached, layer0)
-        d[f"Tc={Tc} Tg={Tg} cache_length={0}"] = ret0
-        torch.cuda.empty_cache()
+                    x = torch.randn((B, Tc, H)).to(device)
+                    ret0 = pipeline(bench_cached, layer0)
+                    d[f"Tc={Tc} Tg={Tg} cache_length={0}"] = ret0
+                    torch.cuda.empty_cache()
 
-        x = torch.randn((B, Tc, H)).to(device)
-        ret1 = pipeline(bench_cached, layer1)
-        d[f"Tc={Tc} Tg={Tg} cache_length={0.25 * Tg}"] = ret1
-        torch.cuda.empty_cache()
+                    x = torch.randn((B, Tc, H)).to(device)
+                    ret1 = pipeline(bench_cached, layer1)
+                    d[f"Tc={Tc} Tg={Tg} cache_length={0.25 * Tg}"] = ret1
+                    torch.cuda.empty_cache()
 
-        x = torch.randn((B, Tc, H)).to(device)
-        ret2 = pipeline(bench_cached, layer2)
-        d[f"Tc={Tc} Tg={Tg} cache_length={0.5 * Tg}"] = ret2
-        torch.cuda.empty_cache()
+                    x = torch.randn((B, Tc, H)).to(device)
+                    ret2 = pipeline(bench_cached, layer2)
+                    d[f"Tc={Tc} Tg={Tg} cache_length={0.5 * Tg}"] = ret2
+                    torch.cuda.empty_cache()
 
-        x = torch.randn((B, Tc, H)).to(device)
-        ret3 = pipeline(bench_cached, layer3)
-        d[f"Tc={Tc} Tg={Tg} cache_length={0.75 * Tg}"] = ret3
-        torch.cuda.empty_cache()
+                    x = torch.randn((B, Tc, H)).to(device)
+                    ret3 = pipeline(bench_cached, layer3)
+                    d[f"Tc={Tc} Tg={Tg} cache_length={0.75 * Tg}"] = ret3
+                    torch.cuda.empty_cache()
 
-        x = torch.randn((B, Tc, H)).to(device)
-        ret4 = pipeline(bench_cached, layer4)
-        d[f"Tc={Tc} Tg={Tg} cache_length={Tg}"] = ret4
-        torch.cuda.empty_cache()
+                    x = torch.randn((B, Tc, H)).to(device)
+                    ret4 = pipeline(bench_cached, layer4)
+                    d[f"Tc={Tc} Tg={Tg} cache_length={Tg}"] = ret4
+                    torch.cuda.empty_cache()
 
-    print(d)
-    df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(MB)", "mem_std(MB)", "t1_mean(s)", "t2_mean(s)", "t3_mean(s)"])
-    print(df)
-    df.to_csv(f"mem_selfattn_117M_K={K}_test.csv")
-
+        print(d)
+        df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(MB)", "mem_std(MB)", "t1_mean(s)", "t1_std(s)", "t2_mean(s)", "t2_std(s)","t3_mean(s)", "t3_std(s)"])
+        print(df)
+        df.to_csv(f"logs/mem_selfattn_{model_size}_K={K}_test_zeropad_nograd_AMP.csv")
+    print(time.time() - start)
     ############################################################## Works
     # B, K, Tc, H = (16, 12, 128, 768)
     # Tg = Tc 
