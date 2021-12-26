@@ -235,7 +235,7 @@ if __name__ == "__main__":
         with torch.no_grad():
             with torch.autocast(device):
                 d = {}
-                Tcs = [512, 256, 128] # 128, 256, 512, 1024
+                Tcs = [1024, 512, 256, 128] # 128, 256, 512, 1024
                 K = 4
                 B, H = hparam
                 for Tc in Tcs:
