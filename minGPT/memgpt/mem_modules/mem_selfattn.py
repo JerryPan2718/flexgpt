@@ -12,7 +12,7 @@ import torch.cuda.profiler as profiler
 from torch.profiler import profile, record_function, ProfilerActivity
 # from pypapi import papi_high as high
 # from pypapi import events as papi_events
-
+from mem_gpt_flops import selfattn_flop
 
 import logging
 logging.basicConfig(level=logging.DEBUG)
@@ -188,16 +188,24 @@ def pipeline(benchmark_function, module):
             total_time.append(ret[0])    
             mem_usage += ret[1]
         
-        
         return [np.mean(total_time), np.std(total_time), np.mean(mem_usage) / 10 ** 6, np.std(mem_usage) / 10 ** 6]
 
 
 if __name__ == "__main__":
     d = {}
-    Tcs = [1024, 512, 256, 128] # 128, 256, 512, 1024
+    Tcs = [128] # 1024, 512, 256, 128
     B, K, _, H = (2, 4, 128, 128)
     for Tc in Tcs:
         Tg = Tc 
+        # cache_lengths = [0, 0.25, 0.5, 0.75, 1]
+        # for cache_length in cache_lengths:
+        #     layer = CachedSelfAttn(n_head=K, n_hidden=H, cache_length=cache_length*Tg).to(device)
+        #     x = torch.randn((B, Tc, H)).to(device)
+        #     ret0 = pipeline(bench_cached, layer)
+        #     flops = selfattn_flop(B=B, H=H, K=K, Tc=Tc, Tg=Tg, cache_length=cache_length)
+        #     d[f"Tc={Tc} Tg={Tg} cache_length={cache_length*Tg}"] = ret0 + [flops]
+        #     torch.cuda.empty_cache()
+
         layer0 = CachedSelfAttn(K, H, cache_length=0).to(device)
         layer1 = CachedSelfAttn(K, H, cache_length=0.25 * Tg).to(device)
         layer2 = CachedSelfAttn(K, H, cache_length=0.5 * Tg).to(device)
@@ -206,7 +214,9 @@ if __name__ == "__main__":
 
         x = torch.randn((B, Tc, H)).to(device)
         ret0 = pipeline(bench_cached, layer0)
-        d[f"Tc={Tc} Tg={Tg} cache_length={0}"] = ret0
+        flops = selfattn_flop(B=B, H=H, K=K, Tc=Tc, Tg=Tg, cache_length=0)
+        print(ret0 + [flops])
+        d[f"Tc={Tc} Tg={Tg} cache_length={0}"] = ret0 + [flops]
         torch.cuda.empty_cache()
 
         x = torch.randn((B, Tc, H)).to(device)
@@ -230,9 +240,9 @@ if __name__ == "__main__":
         torch.cuda.empty_cache()
 
     print(d)
-    df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(MB)", "mem_std(MB)"])
+    df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(MB)", "mem_std(MB)", "flops"])
     print(df)
-    df.to_csv("mem_selfattn.csv")
+    # df.to_csv("mem_selfattn.csv")
 
     ############################################################## Works
     # B, K, Tc, H = (16, 12, 128, 768)

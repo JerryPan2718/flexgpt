@@ -11,6 +11,8 @@ from tqdm import tqdm
 import torch.cuda.profiler as profiler
 from torch.profiler import profile, record_function, ProfilerActivity
 import datetime
+from mem_gpt_flops import selfattn_flop
+
 
 today = datetime.date.today()
 # from pypapi import papi_high as high
@@ -112,7 +114,6 @@ class CachedSelfAttn(CachedModule):
             attn = qkt * (1.0 / math.sqrt(k.size(-1)))
             attn = attn.to(x.device)
         t2 = T2.elapsed
-
         
         mask = self.mask[:, :, :T, :T].to(x.device)
         attn = attn.masked_fill(mask == 0, float('-inf'))
@@ -235,7 +236,7 @@ if __name__ == "__main__":
         with torch.no_grad():
             with torch.autocast(device):
                 d = {}
-                Tcs = [1024, 512, 256, 128] # 128, 256, 512, 1024
+                Tcs = [512, 256, 128] # 1024, 512, 256, 128
                 K = 4
                 B, H = hparam
                 for Tc in Tcs:
@@ -248,78 +249,41 @@ if __name__ == "__main__":
 
                     x = torch.randn((B, Tc, H)).to(device)
                     ret0 = pipeline(bench_cached, layer0)
-                    d[f"Tc={Tc} Tg={Tg} cache_length={0}"] = ret0
+                    flops = selfattn_flop(B=B, H=H, K=K, Tc=Tc, Tg=Tg, cache_length=0)
+                    print(ret0 + [flops])
+                    d[f"Tc={Tc} Tg={Tg} cache_length={0}"] = ret0 + [flops]
                     torch.cuda.empty_cache()
 
                     x = torch.randn((B, Tc, H)).to(device)
                     ret1 = pipeline(bench_cached, layer1)
-                    d[f"Tc={Tc} Tg={Tg} cache_length={0.25 * Tg}"] = ret1
+                    flops = selfattn_flop(B=B, H=H, K=K, Tc=Tc, Tg=Tg, cache_length=0.25 * Tg)
+                    print(ret1 + [flops])
+                    d[f"Tc={Tc} Tg={Tg} cache_length={0.25 * Tg}"] = ret1 + [flops]
                     torch.cuda.empty_cache()
 
                     x = torch.randn((B, Tc, H)).to(device)
                     ret2 = pipeline(bench_cached, layer2)
-                    d[f"Tc={Tc} Tg={Tg} cache_length={0.5 * Tg}"] = ret2
+                    flops = selfattn_flop(B=B, H=H, K=K, Tc=Tc, Tg=Tg, cache_length=0.5 * Tg)
+                    print(ret2 + [flops])
+                    d[f"Tc={Tc} Tg={Tg} cache_length={0.5 * Tg}"] = ret2 + [flops]
                     torch.cuda.empty_cache()
 
                     x = torch.randn((B, Tc, H)).to(device)
                     ret3 = pipeline(bench_cached, layer3)
-                    d[f"Tc={Tc} Tg={Tg} cache_length={0.75 * Tg}"] = ret3
+                    flops = selfattn_flop(B=B, H=H, K=K, Tc=Tc, Tg=Tg, cache_length=0.75 * Tg)
+                    print(ret3 + [flops])
+                    d[f"Tc={Tc} Tg={Tg} cache_length={0.75 * Tg}"] = ret3 + [flops]
                     torch.cuda.empty_cache()
 
                     x = torch.randn((B, Tc, H)).to(device)
                     ret4 = pipeline(bench_cached, layer4)
-                    d[f"Tc={Tc} Tg={Tg} cache_length={Tg}"] = ret4
+                    flops = selfattn_flop(B=B, H=H, K=K, Tc=Tc, Tg=Tg, cache_length=Tg)
+                    print(ret4 + [flops])
+                    d[f"Tc={Tc} Tg={Tg} cache_length={Tg}"] = ret4 + [flops]
                     torch.cuda.empty_cache()
 
         print(d)
-        df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(MB)", "mem_std(MB)", "t1_mean(s)", "t1_std(s)", "t2_mean(s)", "t2_std(s)","t3_mean(s)", "t3_std(s)"])
+        df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(MB)", "mem_std(MB)", "t1_mean(s)", "t1_std(s)", "t2_mean(s)", "t2_std(s)","t3_mean(s)", "t3_std(s)", "flops"])
         print(df)
         df.to_csv(f"logs/{today}-mem_selfattn_{model_size}_K={K}_test_nograd_AMP.csv")
     print(time.time() - start)
-    ############################################################## Works
-    # B, K, Tc, H = (16, 12, 128, 768)
-    # Tg = Tc 
-
-    # layer0 = CachedSelfAttn(K, H, cache_length=0).cuda()
-    # layer1 = CachedSelfAttn(K, H, cache_length=32).cuda()
-    # layer2 = CachedSelfAttn(K, H, cache_length=64).cuda()
-    # layer3 = CachedSelfAttn(K, H, cache_length=96).cuda()
-    # layer4 = CachedSelfAttn(K, H, cache_length=128).cuda()
-    # x = torch.randn((B, Tc, H)).cuda()
-
-    # # warmup
-    # for i in tqdm(range(4)):
-    #     bench_cached(layer0, x, Tg)
-
-    # # bench
-    # total_time = []
-    # memUsage = []
-    # for i in tqdm(range(8)):
-    #     ret = bench_cached(layer0, x, Tg)
-    #     total_time.append(ret[0])    
-    #     memUsage += ret[1]
-
-
-    # mean = np.mean(total_time)
-    # stddev = np.std(total_time)
-    # print(f"Runtime w/o cache: {mean:.2f} +- {stddev:.2f}ms")
-    # print(f"memUsage w/o cache: {np.mean(memUsage) / 10 ** 6:.2f} +- {np.std(memUsage) / 10 ** 6:.2f}MB")
-
-    # # bench_uncached_chrome_trace(layer, x, 2)
-
-    # # warmup
-    # for i in tqdm(range(4)):
-    #     bench_cached(layer1, x, Tg)
-
-    # # bench
-    # total_time = []
-    # memUsage = []
-    # for i in tqdm(range(8)):
-    #     ret = bench_cached(layer1, x, Tg)
-    #     total_time.append(ret[0])    
-    #     memUsage += ret[1]
-
-    # mean = np.mean(total_time)
-    # stddev = np.std(total_time)
-    # print(f"Runtime w/ cache_length=32: {mean:.2f} +- {stddev:.2f}ms")
-    # print(f"memUsage w/ cache_length=32: {np.mean(memUsage) / 10 ** 6:.2f} +- {np.std(memUsage) / 10 ** 6:.2f}MB")

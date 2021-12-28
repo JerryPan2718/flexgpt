@@ -59,7 +59,8 @@ class Concat(DNNLayer):
 			out_shape=(SEQ_LEN,I * ATTN_HEADS),
 			depends_on=[input] if input is not None else [],
 			param_count=HIDDEN_DIM*I*ATTN_HEADS)
-		self.flop = SEQ_LEN*HIDDEN_DIM*I*ATTN_HEADS
+		# self.flop = SEQ_LEN*HIDDEN_DIM*I*ATTN_HEADS
+		self.flop = 0
 
 class LinearLayerReLU(DNNLayer):
     def __init__(self, in_features: int, out_features: int, input: DNNLayer):
@@ -78,39 +79,23 @@ class LinearLayerReLU(DNNLayer):
         assert len(input.out_shape) == 2 and input.out_shape[1] == in_features, f"{input.out_shape}, {in_features}"
         return (input.out_shape[0], out_features)
 
-def selfattn_flop(B, H, K, Tc, Tg, cache=True):
-		if cache:
-			#### Mem_selfattn
-			# 0th forward pass
-			mem_selfattn_flop = 0
-			x = DNNLayer(out_shape=(B, Tc, H))
-			qkt = QKTMatrix(SEQ_LEN=Tc, HIDDEN_DIM=H, I=1, ATTN_HEADS=K, input=x)
-			mask = Mask(input=x)
-			# print(qkt.flop)
-			# print(mask.flop)
-			mem_selfattn_flop = qkt.flop + mask.flop
+def selfattn_flop(B, H, K, Tc, Tg, cache_length=0):
+	assert cache_length >= 0, "cache_length should be non-negative"
 
-			# 1th-(n-1)th forward pass
-			for i in range(1, Tg):
-				x = DNNLayer(out_shape=(B, Tc + i, H))
-				x_row = DNNLayer(out_shape=(B, 1, H))
-				qkt = QKTMatrix(SEQ_LEN=Tc+i, HIDDEN_DIM=H, I=1, ATTN_HEADS=K, input=x_row)
-				mask = Mask(input=x)
-				cat = Concat(SEQ_LEN=Tc+i, HIDDEN_DIM=H, I=1, ATTN_HEADS=K, input=x)
-				mem_selfattn_flop += qkt.flop + mask.flop + cat.flop
-
-			print(f"mem_selfattn_flop: {mem_selfattn_flop}")
+	x = DNNLayer(out_shape=(B, Tc, H))
+	qkt = QKTMatrix(SEQ_LEN=Tc, HIDDEN_DIM=H, I=1, ATTN_HEADS=K, input=x)
+	mask = Mask(input=x)
+	flops = qkt.flop + mask.flop
+	for i in range(1, Tg):
+		x = DNNLayer(out_shape=(B, Tc + i, H))
+		if i <= cache_length:
+			qkt = QKTMatrix(SEQ_LEN=1, HIDDEN_DIM=H, I=1, ATTN_HEADS=K, input=x)
 		else:
-			#### Mim_selfattn
-			# 0th-(n-1)th forward pass
-			min_selfattn_flop = 0
-			for i in range(0, Tg):
-				x = DNNLayer(out_shape=(B, Tc + i, H))
-				qkt = QKTMatrix(SEQ_LEN=Tc, HIDDEN_DIM=H, I=1, ATTN_HEADS=K, input=x)
-				mask = Mask(input=x)
-				min_selfattn_flop += qkt.flop + mask.flop
+			qkt = QKTMatrix(SEQ_LEN=Tc + i, HIDDEN_DIM=H, I=1, ATTN_HEADS=K, input=x)
+		flops += qkt.flop
 
-			print(f"min_selfattn_flop: {min_selfattn_flop}")
+	print(f"selfattn_flop: {flops}")
+	return flops
 
 if __name__ == "__main__":
 	
@@ -119,11 +104,10 @@ if __name__ == "__main__":
 	B, H = hparams["117M"]
 	Tc = 128
 	Tg = 128
-    # layer = CachedSelfAttn(K, H).cuda()
-    # x = torch.randn((B, T, H)).cuda()
 
-	selfattn_flop(B=B, H=H, K=K, Tc=Tc, Tg=Tg, cache=True)
-	selfattn_flop(B=B, H=H, K=K, Tc=Tc, Tg=Tg, cache=False)
+	selfattn_flop(B=B, H=H, K=K, Tc=Tc, Tg=Tg, cache_length=0)
+	selfattn_flop(B=B, H=H, K=K, Tc=Tc, Tg=Tg, cache_length=64)
+	selfattn_flop(B=B, H=H, K=K, Tc=Tc, Tg=Tg, cache_length=128)
 
 
 
