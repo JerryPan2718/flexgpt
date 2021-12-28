@@ -83,15 +83,15 @@ def selfattn_flop(B, H, K, Tc, Tg, cache_length=0):
 	assert cache_length >= 0, "cache_length should be non-negative"
 
 	x = DNNLayer(out_shape=(B, Tc, H))
-	qkt = QKTMatrix(SEQ_LEN=Tc, HIDDEN_DIM=H, I=1, ATTN_HEADS=K, input=x)
+	qkt = QKTMatrix(SEQ_LEN=Tc, HIDDEN_DIM=H, I=H//K, ATTN_HEADS=K, input=x)
 	mask = Mask(input=x)
 	flops = qkt.flop + mask.flop
 	for i in range(1, Tg):
 		x = DNNLayer(out_shape=(B, Tc + i, H))
 		if i <= cache_length:
-			qkt = QKTMatrix(SEQ_LEN=1, HIDDEN_DIM=H, I=1, ATTN_HEADS=K, input=x)
+			qkt = QKTMatrix(SEQ_LEN=1, HIDDEN_DIM=H, I=H//K, ATTN_HEADS=K, input=x)
 		else:
-			qkt = QKTMatrix(SEQ_LEN=Tc + i, HIDDEN_DIM=H, I=1, ATTN_HEADS=K, input=x)
+			qkt = QKTMatrix(SEQ_LEN=Tc + i, HIDDEN_DIM=H, I=H//K, ATTN_HEADS=K, input=x)
 		flops += qkt.flop
 
 	print(f"selfattn_flop: {flops}")

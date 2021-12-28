@@ -186,7 +186,6 @@ def bench_cached(module, x, n_gen, is_profile=False):
                     y_new = torch.randn((B, 1, H)).to(device)
                     x = check_shape(torch.cat((y, y_new), dim=-2).to(device), (B, T + i, H))
                     mem_usage.append(torch.cuda.memory_allocated())
-    print(np.sum(t1_array), np.sum(t2_array), np.sum(t3_array))
     return t.elapsed, mem_usage, np.sum(t1_array), np.sum(t2_array), np.sum(t3_array)
 
 def bench_uncached(module, x, n_gen, is_profile=False):
@@ -244,11 +243,11 @@ if __name__ == "__main__":
         with torch.no_grad():
             with torch.autocast(device):
                 d = {}
-                Ts = [512, 256, 128] # 1024, 512, 256, 128
+                Ts = [1024, 512, 256, 128] # 1024, 512, 256, 128
                 K = 4
                 B, H = hparam
                 for T in Ts:
-                    Tc = 32
+                    Tc = 1
                     Tg = T
                     layer0 = CachedSelfAttn(K, H, cache_length=0, B=B, T=Tc+Tg).to(device)
                     layer1 = CachedSelfAttn(K, H, cache_length=0.25 * Tg, B=B, T=Tc+Tg).to(device)
@@ -294,5 +293,5 @@ if __name__ == "__main__":
         print(d)
         df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(MB)", "mem_std(MB)", "t1_mean(s)", "t1_std(s)", "t2_mean(s)", "t2_std(s)","t3_mean(s)", "t3_std(s)", "flops"])
         print(df)
-        df.to_csv(f"logs/{today}-mem_selfattn_{model_size}_K={K}_test_nograd_AMP_smallTc.csv")
+        df.to_csv(f"logs/{today}-mem_selfattn_{model_size}_K={K}_test_nograd_AMP_Tc=1.csv")
     print(time.time() - start)
