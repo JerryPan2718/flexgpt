@@ -153,7 +153,7 @@ class CachedSelfAttn(CachedModule):
         return y, t1, t2, t3
 
 ### Helper function for Benchmark ###
-def bench_cached(module, x, n_gen):
+def bench_cached(module, x, n_gen, is_profile=False):
     t1_array = []
     t2_array = []
     t3_array = []
@@ -164,19 +164,32 @@ def bench_cached(module, x, n_gen):
     module.reset_cache_counter()
     with torch.inference_mode():
         with PytorchTimer(verbose=False) as t:
-            for i in range(1, n_gen + 1):
-                y, t1, t2, t3 = module(x.to(device))
-                y = check_shape(y, x.shape)
-                t1_array.append(t1)
-                t2_array.append(t2)
-                t3_array.append(t3)
-                y_new = torch.randn((B, 1, H)).to(device)
-                x = check_shape(torch.cat((y, y_new), dim=-2).to(device), (B, T + i, H))
-                mem_usage.append(torch.cuda.memory_allocated())
+            if is_profile:
+                with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+                    for i in range(1, 200):
+                        y, t1, t2, t3 = module(x.to(device))
+                        y = check_shape(y, x.shape)
+                        t1_array.append(t1)
+                        t2_array.append(t2)
+                        t3_array.append(t3)
+                        y_new = torch.randn((B, 1, H)).to(device)
+                        x = check_shape(torch.cat((y, y_new), dim=-2).to(device), (B, T + i, H))
+                        mem_usage.append(torch.cuda.memory_allocated())
+                prof.export_chrome_trace(f"profiles/{today}-trace-token_length={x.size(1)} mem_length={module.cache_length}.json")
+            else:
+                for i in range(1, n_gen + 1):
+                    y, t1, t2, t3 = module(x.to(device))
+                    y = check_shape(y, x.shape)
+                    t1_array.append(t1)
+                    t2_array.append(t2)
+                    t3_array.append(t3)
+                    y_new = torch.randn((B, 1, H)).to(device)
+                    x = check_shape(torch.cat((y, y_new), dim=-2).to(device), (B, T + i, H))
+                    mem_usage.append(torch.cuda.memory_allocated())
     print(np.sum(t1_array), np.sum(t2_array), np.sum(t3_array))
     return t.elapsed, mem_usage, np.sum(t1_array), np.sum(t2_array), np.sum(t3_array)
 
-def bench_uncached(module, x, n_gen):
+def bench_uncached(module, x, n_gen, is_profile=False):
     x = x.to(device)
     B, T, H = x.shape
     mem_usage = []
@@ -205,22 +218,15 @@ def pipeline(benchmark_function, module):
         mem_usage = []
         # FLOP = []
         for i in tqdm(range(8)):
-            # if i == 7:
-            #     with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
-            #         ret = benchmark_function(module, x, Tg)
-            #         total_time.append(ret[0])    
-            #         mem_usage += ret[1]
-            #         # FLOP = ret[2]
-            #     # prof.export_chrome_trace(f"trace-token_length={x.size(1)} mem_length={module.cache_length}.json")
-
-            # else:
-            ret = benchmark_function(module, x, Tg)
+            ret = benchmark_function(module, x, Tg, False)
             total_time.append(ret[0])    
             mem_usage += ret[1]
             t1_array.append(ret[2])
             t2_array.append(ret[3])
             t3_array.append(ret[4])
         
+        # benchmark_function(module, x, Tg, True)
+
         return [np.mean(total_time), np.std(total_time), np.mean(mem_usage) / 10 ** 6, np.std(mem_usage) / 10 ** 6, np.mean(t1_array), np.std(t1_array), np.mean(t2_array), np.std(t2_array), np.mean(t3_array), np.std(t3_array)]
 
 
@@ -233,14 +239,17 @@ if __name__ == "__main__":
     hparams = {"117M": (12, 768), "345M": (24, 1024), "762M": (36, 1280), "1542M": (48, 1600)}
     start = time.time()
     for model_size, hparam in hparams.items():
+        # if model_size != "117M":
+        #     continue
         with torch.no_grad():
             with torch.autocast(device):
                 d = {}
-                Tcs = [512, 256, 128] # 1024, 512, 256, 128
+                Ts = [512, 256, 128] # 1024, 512, 256, 128
                 K = 4
                 B, H = hparam
-                for Tc in Tcs:
-                    Tg = Tc 
+                for T in Ts:
+                    Tc = 32
+                    Tg = T
                     layer0 = CachedSelfAttn(K, H, cache_length=0, B=B, T=Tc+Tg).to(device)
                     layer1 = CachedSelfAttn(K, H, cache_length=0.25 * Tg, B=B, T=Tc+Tg).to(device)
                     layer2 = CachedSelfAttn(K, H, cache_length=0.5 * Tg, B=B, T=Tc+Tg).to(device)
@@ -285,5 +294,5 @@ if __name__ == "__main__":
         print(d)
         df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(MB)", "mem_std(MB)", "t1_mean(s)", "t1_std(s)", "t2_mean(s)", "t2_std(s)","t3_mean(s)", "t3_std(s)", "flops"])
         print(df)
-        df.to_csv(f"logs/{today}-mem_selfattn_{model_size}_K={K}_test_nograd_AMP.csv")
+        df.to_csv(f"logs/{today}-mem_selfattn_{model_size}_K={K}_test_nograd_AMP_smallTc.csv")
     print(time.time() - start)
