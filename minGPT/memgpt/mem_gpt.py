@@ -6,6 +6,24 @@ import torch.nn as nn
 from torch.nn import functional as F
 from loguru import logger
 
+class MemGPTConfig:
+    """ base GPT config, params common to all GPT versions """
+    embd_pdrop = 0.1
+    resid_pdrop = 0.1
+    attn_pdrop = 0.1
+
+    def __init__(self, vocab_size, block_size, **kwargs):
+        self.vocab_size = vocab_size
+        self.block_size = block_size
+        for k,v in kwargs.items():
+            setattr(self, k, v)
+
+class MemGPT1Config(MemGPTConfig):
+    """ GPT-1 like network roughly 125M params """
+    B = 12
+    K = 12
+    H = 768
+
 class MemGPT(nn.Module):
     """  the full GPT language model, with a context size of block_size """
 
@@ -13,16 +31,16 @@ class MemGPT(nn.Module):
         super().__init__()
 
         # input embedding stem
-        self.tok_emb = nn.Embedding(config.vocab_size, config.n_embd)
-        self.pos_emb = nn.Parameter(torch.zeros(1, config.block_size, config.n_embd))
-        # self.drop = nn.Dropout(config.embd_pdrop)
+        self.tok_emb = nn.Embedding(config.vocab_size, config.H)
+        self.pos_emb = nn.Parameter(torch.zeros(1, config.B, config.H))
+        self.drop = nn.Dropout(config.embd_pdrop)
         # transformer
-        self.blocks = nn.Sequential(*[MemBlock(config) for _ in range(config.n_layer)])
+        self.blocks = nn.Sequential(*[MemBlock(config) for _ in range(config.B)])
         # decoder head
-        self.ln_f = nn.LayerNorm(config.n_embd)
-        self.head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        self.ln_f = nn.LayerNorm(config.H)
+        self.head = nn.Linear(config.H, config.vocab_size, bias=False)
 
-        self.block_size = config.block_size
+        self.block_size = config.B
         self.apply(self._init_weights)
 
         logger.info("number of parameters: %e", sum(p.numel() for p in self.parameters()))
@@ -92,7 +110,7 @@ class MemGPT(nn.Module):
         # forward the GPT model
         token_embeddings = self.tok_emb(idx) # each index maps to a (learnable) vector
         position_embeddings = self.pos_emb[:, :t, :] # each position maps to a (learnable) vector
-        # x = self.drop(token_embeddings + position_embeddings)
+        x = self.drop(token_embeddings + position_embeddings)
         x = self.blocks(x)
         x = self.ln_f(x)
         logits = self.head(x)

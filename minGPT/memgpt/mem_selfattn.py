@@ -36,6 +36,10 @@ class CachedSelfAttn(CachedModule):
         """
         super().__init__(dict(qkt=None, y=None))
         assert n_hidden % n_head == 0, "linear layer dimension is not divisible by n_head"
+        self.device = 'cpu'
+        if torch.cuda.is_available():
+            self.device = torch.cuda.current_device()
+
         self.q = CachedLinear(n_hidden, n_hidden)
         self.k = CachedLinear(n_hidden, n_hidden)
         self.v = CachedLinear(n_hidden, n_hidden)
@@ -47,7 +51,6 @@ class CachedSelfAttn(CachedModule):
         self.n_hidden = n_hidden
         self.cache_counter = 0
         self.cache_length = cache_length
-        # self.zero_pad = torch.zeros(B, K, T, T, device=device)
     
     def clear_cache(self):
         self.q.clear_cache()
@@ -61,8 +64,9 @@ class CachedSelfAttn(CachedModule):
     
     def get_cache(self, key, device=None):
         val = self.cache.get(key, None) if self.cache else None
-        if val is not None and device is not None:
-            val = val.to(device)
+        # if val is not None and device is not None:
+        #     print(val.get_device())
+        #     val = val
         return val
         
     def reset_cache_counter(self):
@@ -82,11 +86,13 @@ class CachedSelfAttn(CachedModule):
             qkt = q @ k.transpose(-2, -1) 
             att = qkt * (1.0 / math.sqrt(k.size(-1)))
         t2 = T2.elapsed
-        # attn = attn.to(x.device)
+
         with PytorchTimer(verbose=False) as T3:
-            mask = self.mask[:, :, :T, :T].to(x.device)
+            mask = self.mask[:, :, :T, :T].to(self.device)
+            print(mask.get_device())
             att = att.masked_fill(mask == 0, float('-inf'))
             att = F.softmax(att, dim=-1)
+            att = self.attn_drop(att)
             y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
         t3 = T3.elapsed
         return qkt, y, t1, t2, t3
@@ -112,7 +118,7 @@ class CachedSelfAttn(CachedModule):
         with PytorchTimer(verbose=False) as T2:
             qkt[:, :, -1:, :] = q[:, :, -1:, :] @ k.transpose(-2, -1)
             attn = qkt * (1.0 / math.sqrt(k.size(-1)))
-            attn = attn.to(x.device)
+            attn = attn.to(self.device)
         t2 = T2.elapsed
         
         mask = self.mask[:, :, :T, :T].to(x.device)
@@ -238,52 +244,53 @@ if __name__ == "__main__":
     hparams = {"117M": (12, 768), "345M": (24, 1024), "762M": (36, 1280), "1542M": (48, 1600)}
     start = time.time()
     for model_size, hparam in hparams.items():
-        # if model_size != "117M":
-        #     continue
+        if model_size != "117M":
+            continue
         with torch.no_grad():
             with torch.autocast(device):
                 d = {}
-                Ts = [1024, 512, 256, 128] # 1024, 512, 256, 128
+                Ts = [128] # 1024, 512, 256, 128
                 K = 4
                 B, H = hparam
                 for T in Ts:
                     Tc = 1
                     Tg = T
-                    layer0 = CachedSelfAttn(K, H, cache_length=0, B=B, T=Tc+Tg).to(device)
-                    layer1 = CachedSelfAttn(K, H, cache_length=0.25 * Tg, B=B, T=Tc+Tg).to(device)
-                    layer2 = CachedSelfAttn(K, H, cache_length=0.5 * Tg, B=B, T=Tc+Tg).to(device)
-                    layer3 = CachedSelfAttn(K, H, cache_length=0.75 * Tg, B=B, T=Tc+Tg).to(device)
-                    layer4 = CachedSelfAttn(K, H, cache_length=Tg, B=B, T=Tc+Tg).to(device)
+                    layer0 = CachedSelfAttn(K, H, cache_length=0, B=B, T=Tc+Tg)
+                    layer1 = CachedSelfAttn(K, H, cache_length=0.25 * Tg, B=B, T=Tc+Tg)
+                    layer2 = CachedSelfAttn(K, H, cache_length=0.5 * Tg, B=B, T=Tc+Tg)
+                    layer3 = CachedSelfAttn(K, H, cache_length=0.75 * Tg, B=B, T=Tc+Tg)
+                    layer4 = CachedSelfAttn(K, H, cache_length=Tg, B=B, T=Tc+Tg)
 
-                    x = torch.randn((B, Tc, H)).to(device)
+                    x = torch.randn((B, Tc, H), device=device)
+                    print(x.get_device())
                     ret0 = pipeline(bench_cached, layer0)
                     flops = selfattn_flop(B=B, H=H, K=K, Tc=Tc, Tg=Tg, cache_length=0)
                     print(ret0 + [flops])
                     d[f"Tc={Tc} Tg={Tg} cache_length={0}"] = ret0 + [flops]
                     torch.cuda.empty_cache()
 
-                    x = torch.randn((B, Tc, H)).to(device)
+                    x = torch.randn((B, Tc, H), device=device)
                     ret1 = pipeline(bench_cached, layer1)
                     flops = selfattn_flop(B=B, H=H, K=K, Tc=Tc, Tg=Tg, cache_length=0.25 * Tg)
                     print(ret1 + [flops])
                     d[f"Tc={Tc} Tg={Tg} cache_length={0.25 * Tg}"] = ret1 + [flops]
                     torch.cuda.empty_cache()
 
-                    x = torch.randn((B, Tc, H)).to(device)
+                    x = torch.randn((B, Tc, H), device=device)
                     ret2 = pipeline(bench_cached, layer2)
                     flops = selfattn_flop(B=B, H=H, K=K, Tc=Tc, Tg=Tg, cache_length=0.5 * Tg)
                     print(ret2 + [flops])
                     d[f"Tc={Tc} Tg={Tg} cache_length={0.5 * Tg}"] = ret2 + [flops]
                     torch.cuda.empty_cache()
 
-                    x = torch.randn((B, Tc, H)).to(device)
+                    x = torch.randn((B, Tc, H), device=device)
                     ret3 = pipeline(bench_cached, layer3)
                     flops = selfattn_flop(B=B, H=H, K=K, Tc=Tc, Tg=Tg, cache_length=0.75 * Tg)
                     print(ret3 + [flops])
                     d[f"Tc={Tc} Tg={Tg} cache_length={0.75 * Tg}"] = ret3 + [flops]
                     torch.cuda.empty_cache()
 
-                    x = torch.randn((B, Tc, H)).to(device)
+                    x = torch.randn((B, Tc, H), device=device)
                     ret4 = pipeline(bench_cached, layer4)
                     flops = selfattn_flop(B=B, H=H, K=K, Tc=Tc, Tg=Tg, cache_length=Tg)
                     print(ret4 + [flops])

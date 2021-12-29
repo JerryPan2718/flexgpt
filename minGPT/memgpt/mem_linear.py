@@ -6,11 +6,17 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 
 
+# print(device)
+
 class CachedLinear(CachedModule):
     """ cached nn.Linear layer """
     def __init__(self, in_features, out_features, bias=True, x=None, **kwargs):
+        self.device = 'cpu'
+        if torch.cuda.is_available():
+            self.device = torch.cuda.current_device()
+
         CachedModule.__init__(self, x)
-        self.layer = nn.Linear(in_features, out_features, bias, **kwargs)
+        self.layer = nn.Linear(in_features, out_features, bias, **kwargs, device=self.device)
 
     def forward(self, x):
         """ 
@@ -38,8 +44,6 @@ if __name__ == "__main__":
     x = torch.randn((B, T, H))
     with PytorchTimer(verbose=True):
         y = check_shape(layer(x), (B, T, H))
-        FLOP_count = int(str(count_ops(layer, x)[0]).split(" ")[-1])
-        print(FLOP_count)
 
     # layer.clear_cache()
     # x = torch.randn((B, T, H))
