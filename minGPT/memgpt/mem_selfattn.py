@@ -84,16 +84,19 @@ class CachedSelfAttn(CachedModule):
 
         with PytorchTimer(verbose=False) as T2:
             qkt = q @ k.transpose(-2, -1) 
-            att = qkt * (1.0 / math.sqrt(k.size(-1)))
+            attn = qkt * (1.0 / math.sqrt(k.size(-1)))
         t2 = T2.elapsed
 
+        
+        mask = self.mask[:, :, :T, :T].to(self.device)
+        attn = attn.masked_fill(mask == 0, float('-inf'))
+        attn = F.softmax(attn, dim=-1)
+        attn = self.attn_drop(attn)
         with PytorchTimer(verbose=False) as T3:
-            mask = self.mask[:, :, :T, :T].to(self.device)
-            att = att.masked_fill(mask == 0, float('-inf'))
-            att = F.softmax(att, dim=-1)
-            att = self.attn_drop(att)
-            y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+            y = attn @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
         t3 = T3.elapsed
+
+        # t1 = t2 = t3 = 0
         return qkt, y, t1, t2, t3
     
     def forward_cached(self, x, qkt_cached, y_cached):
@@ -103,35 +106,34 @@ class CachedSelfAttn(CachedModule):
         qkt_cached = check_shape(qkt_cached, (B, K, T - 1, T - 1))
         y_cached = check_shape(y_cached, (B, K, T - 1, H // K))
 
-        # with PytorchTimer(verbose=False) as T1:
-        q = self.q(x).view(B, T, K, H // K).transpose(1, 2)
-        k = self.k(x).view(B, T, K, H // K).transpose(1, 2)
-        v = self.v(x).view(B, T, K, H // K).transpose(1, 2)
+        with PytorchTimer(verbose=False) as T1:
+            q = self.q(x).view(B, T, K, H // K).transpose(1, 2)
+            k = self.k(x).view(B, T, K, H // K).transpose(1, 2)
+            v = self.v(x).view(B, T, K, H // K).transpose(1, 2)
 
-        # qkt = self.zero_pad[:B, :K, :T, :T]
-        qkt = torch.zeros(B, K, T, T, device=x.device)
-        qkt[:, :, :T-1, :T-1] = qkt_cached
-        # t1 = T1.elapsed
+            qkt = torch.zeros(B, K, T, T, device=x.device)
+            qkt[:, :, :T-1, :T-1] = qkt_cached
+        t1 = T1.elapsed
 
         # qkt: BK1(H/K) * BK(H/K)T -> BK1T
-        # with PytorchTimer(verbose=False) as T2:
-        qkt[:, :, -1:, :] = q[:, :, -1:, :] @ k.transpose(-2, -1)
-        attn = qkt * (1.0 / math.sqrt(k.size(-1)))
-        attn = attn.to(self.device)
-        # t2 = T2.elapsed
+        with PytorchTimer(verbose=False) as T2:
+            qkt[:, :, -1:, :] = q[:, :, -1:, :] @ k.transpose(-2, -1)
+            attn = qkt * (1.0 / math.sqrt(k.size(-1)))
+        t2 = T2.elapsed
         
         mask = self.mask[:, :, :T, :T].to(x.device)
         attn = attn.masked_fill(mask == 0, float('-inf'))
         attn = F.softmax(attn, dim=-1)
+        attn = self.attn_drop(attn)
         new_attn = attn[:, :, -1:, :]
-        # with PytorchTimer(verbose=False) as T3:
-        # y_new: BK1T * BKT(H/K) -> BK1(H/K)
-        y_new = new_attn @ v
-        # y: stack(BK1(H/K), BK(T-1)(H/K)) -> BKT(H/K)
-        y = torch.cat((y_cached, y_new), dim=-2)
-        # t3 = T3.elapsed
-        t1 = t2 = t3 = 0
-        
+        with PytorchTimer(verbose=False) as T3:
+            # y_new: BK1T * BKT(H/K) -> BK1(H/K)
+            y_new = new_attn @ v
+            # y: stack(BK1(H/K), BK(T-1)(H/K)) -> BKT(H/K)
+            y = torch.cat((y_cached, y_new), dim=-2)
+        t3 = T3.elapsed
+
+        # t1 = t2 = t3 = 0
         return qkt, y, t1, t2, t3
 
     def forward(self, x):
@@ -172,6 +174,17 @@ def bench_cached(module, x, n_gen, is_profile=False):
         with PytorchTimer(verbose=False) as t:
             if is_profile:
                 with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+                    for i in range(1, 200):
+                        x_copy = x[:]
+                        y, t1, t2, t3 = module(x)
+                        y = check_shape(y, x.shape)
+                        t1_array.append(t1)
+                        t2_array.append(t2)
+                        t3_array.append(t3)
+                        y_new = torch.randn((B, 1, H), device=device)
+                        x = check_shape(torch.cat((y, y_new), dim=-2), (B, T + i, H))
+                        mem_usage.append(torch.cuda.memory_allocated())
+
                     for i in range(1, 200):
                         y, t1, t2, t3 = module(x)
                         y = check_shape(y, x.shape)
@@ -284,5 +297,5 @@ if __name__ == "__main__":
         print(d)
         df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(MB)", "mem_std(MB)", "t1_mean(s)", "t1_std(s)", "t2_mean(s)", "t2_std(s)","t3_mean(s)", "t3_std(s)", "flops"])
         print(df)
-        df.to_csv(f"logs/{today}-mem_selfattn_{model_size}_K={K}_test_nograd_AMP_todevice_optimized.csv")
+        df.to_csv(f"logs/{today}-mem_selfattn_{model_size}_K={K}_test_nograd_AMP_todevice_optimized_t1t2t3.csv")
     print(time.time() - start)
