@@ -12,9 +12,13 @@ class MemGPTConfig:
     resid_pdrop = 0.1
     attn_pdrop = 0.1
 
-    def __init__(self, vocab_size, block_size, **kwargs):
+    def __init__(self, vocab_size, block_size, B=12, K=12, H=768, **kwargs):
         self.vocab_size = vocab_size
         self.block_size = block_size
+        self.B = B
+        self.K = K
+        self.H = H
+
         for k,v in kwargs.items():
             setattr(self, k, v)
 
@@ -30,15 +34,17 @@ class MemGPT(nn.Module):
     def __init__(self, config):
         super().__init__()
 
+        self.config = config
+
         # input embedding stem
-        self.tok_emb = nn.Embedding(config.vocab_size, config.H)
-        self.pos_emb = nn.Parameter(torch.zeros(1, config.B, config.H))
-        self.drop = nn.Dropout(config.embd_pdrop)
+        self.tok_emb = nn.Embedding(self.config.vocab_size, self.config.H)
+        self.pos_emb = nn.Parameter(torch.zeros(1, self.config.B, self.config.H))
+        self.drop = nn.Dropout(self.config.embd_pdrop)
         # transformer
-        self.blocks = nn.Sequential(*[MemBlock(config) for _ in range(config.B)])
+        self.blocks = nn.Sequential(*[MemBlock(self.config) for _ in range(self.config.B)])
         # decoder head
-        self.ln_f = nn.LayerNorm(config.H)
-        self.head = nn.Linear(config.H, config.vocab_size, bias=False)
+        self.ln_f = nn.LayerNorm(self.config.H)
+        self.head = nn.Linear(self.config.H, self.config.vocab_size, bias=False)
 
         self.block_size = config.B
         self.apply(self._init_weights)

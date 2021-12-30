@@ -89,7 +89,6 @@ class CachedSelfAttn(CachedModule):
 
         with PytorchTimer(verbose=False) as T3:
             mask = self.mask[:, :, :T, :T].to(self.device)
-            print(mask.get_device())
             att = att.masked_fill(mask == 0, float('-inf'))
             att = F.softmax(att, dim=-1)
             att = self.attn_drop(att)
@@ -104,33 +103,34 @@ class CachedSelfAttn(CachedModule):
         qkt_cached = check_shape(qkt_cached, (B, K, T - 1, T - 1))
         y_cached = check_shape(y_cached, (B, K, T - 1, H // K))
 
-        with PytorchTimer(verbose=False) as T1:
-            q = self.q(x).view(B, T, K, H // K).transpose(1, 2)
-            k = self.k(x).view(B, T, K, H // K).transpose(1, 2)
-            v = self.v(x).view(B, T, K, H // K).transpose(1, 2)
+        # with PytorchTimer(verbose=False) as T1:
+        q = self.q(x).view(B, T, K, H // K).transpose(1, 2)
+        k = self.k(x).view(B, T, K, H // K).transpose(1, 2)
+        v = self.v(x).view(B, T, K, H // K).transpose(1, 2)
 
-            # qkt = self.zero_pad[:B, :K, :T, :T]
-            qkt = torch.zeros(B, K, T, T, device=x.device)
-            qkt[:, :, :T-1, :T-1] = qkt_cached
-        t1 = T1.elapsed
+        # qkt = self.zero_pad[:B, :K, :T, :T]
+        qkt = torch.zeros(B, K, T, T, device=x.device)
+        qkt[:, :, :T-1, :T-1] = qkt_cached
+        # t1 = T1.elapsed
 
         # qkt: BK1(H/K) * BK(H/K)T -> BK1T
-        with PytorchTimer(verbose=False) as T2:
-            qkt[:, :, -1:, :] = q[:, :, -1:, :] @ k.transpose(-2, -1)
-            attn = qkt * (1.0 / math.sqrt(k.size(-1)))
-            attn = attn.to(self.device)
-        t2 = T2.elapsed
+        # with PytorchTimer(verbose=False) as T2:
+        qkt[:, :, -1:, :] = q[:, :, -1:, :] @ k.transpose(-2, -1)
+        attn = qkt * (1.0 / math.sqrt(k.size(-1)))
+        attn = attn.to(self.device)
+        # t2 = T2.elapsed
         
         mask = self.mask[:, :, :T, :T].to(x.device)
         attn = attn.masked_fill(mask == 0, float('-inf'))
         attn = F.softmax(attn, dim=-1)
         new_attn = attn[:, :, -1:, :]
-        with PytorchTimer(verbose=False) as T3:
-            # y_new: BK1T * BKT(H/K) -> BK1(H/K)
-            y_new = new_attn @ v
-            # y: stack(BK1(H/K), BK(T-1)(H/K)) -> BKT(H/K)
-            y = torch.cat((y_cached, y_new), dim=-2)
-        t3 = T3.elapsed
+        # with PytorchTimer(verbose=False) as T3:
+        # y_new: BK1T * BKT(H/K) -> BK1(H/K)
+        y_new = new_attn @ v
+        # y: stack(BK1(H/K), BK(T-1)(H/K)) -> BKT(H/K)
+        y = torch.cat((y_cached, y_new), dim=-2)
+        # t3 = T3.elapsed
+        t1 = t2 = t3 = 0
         
         return qkt, y, t1, t2, t3
 
@@ -163,7 +163,7 @@ def bench_cached(module, x, n_gen, is_profile=False):
     t1_array = []
     t2_array = []
     t3_array = []
-    x = x.to(device)
+    # x = x.to(device)
     B, T, H = x.shape
     mem_usage = []
     module.clear_cache()
@@ -173,42 +173,26 @@ def bench_cached(module, x, n_gen, is_profile=False):
             if is_profile:
                 with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
                     for i in range(1, 200):
-                        y, t1, t2, t3 = module(x.to(device))
+                        y, t1, t2, t3 = module(x)
                         y = check_shape(y, x.shape)
                         t1_array.append(t1)
                         t2_array.append(t2)
                         t3_array.append(t3)
-                        y_new = torch.randn((B, 1, H)).to(device)
-                        x = check_shape(torch.cat((y, y_new), dim=-2).to(device), (B, T + i, H))
+                        y_new = torch.randn((B, 1, H), device=device)
+                        x = check_shape(torch.cat((y, y_new), dim=-2), (B, T + i, H))
                         mem_usage.append(torch.cuda.memory_allocated())
                 prof.export_chrome_trace(f"profiles/{today}-trace-token_length={x.size(1)} mem_length={module.cache_length}.json")
             else:
                 for i in range(1, n_gen + 1):
-                    y, t1, t2, t3 = module(x.to(device))
+                    y, t1, t2, t3 = module(x)
                     y = check_shape(y, x.shape)
                     t1_array.append(t1)
                     t2_array.append(t2)
                     t3_array.append(t3)
-                    y_new = torch.randn((B, 1, H)).to(device)
-                    x = check_shape(torch.cat((y, y_new), dim=-2).to(device), (B, T + i, H))
+                    y_new = torch.randn((B, 1, H), device=device)
+                    x = check_shape(torch.cat((y, y_new), dim=-2), (B, T + i, H))
                     mem_usage.append(torch.cuda.memory_allocated())
     return t.elapsed, mem_usage, np.sum(t1_array), np.sum(t2_array), np.sum(t3_array)
-
-def bench_uncached(module, x, n_gen, is_profile=False):
-    x = x.to(device)
-    B, T, H = x.shape
-    mem_usage = []
-    module.clear_cache()
-    module.reset_cache_counter()
-    with torch.inference_mode():
-        with PytorchTimer(verbose=False) as t:
-            for i in range(1, n_gen + 1):
-                module.clear_cache()
-                y = check_shape(module(x.to(device)), x.shape)
-                y_new = torch.randn((B, 1, H)).to(device)
-                x = check_shape(torch.cat((y, y_new), dim=-2).to(device), (B, T + i, H))
-                mem_usage.append(torch.cuda.memory_allocated())
-    return t.elapsed, mem_usage
 
 def pipeline(benchmark_function, module):
         t1_array = []
@@ -244,16 +228,16 @@ if __name__ == "__main__":
     hparams = {"117M": (12, 768), "345M": (24, 1024), "762M": (36, 1280), "1542M": (48, 1600)}
     start = time.time()
     for model_size, hparam in hparams.items():
-        if model_size != "117M":
-            continue
+        # if model_size != "117M":
+        #     continue
         with torch.no_grad():
             with torch.autocast(device):
                 d = {}
-                Ts = [128] # 1024, 512, 256, 128
+                Ts = [512, 256, 128] # 1024, 512, 256, 128
                 K = 4
                 B, H = hparam
                 for T in Ts:
-                    Tc = 1
+                    Tc = T
                     Tg = T
                     layer0 = CachedSelfAttn(K, H, cache_length=0, B=B, T=Tc+Tg)
                     layer1 = CachedSelfAttn(K, H, cache_length=0.25 * Tg, B=B, T=Tc+Tg)
@@ -300,5 +284,5 @@ if __name__ == "__main__":
         print(d)
         df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(MB)", "mem_std(MB)", "t1_mean(s)", "t1_std(s)", "t2_mean(s)", "t2_std(s)","t3_mean(s)", "t3_std(s)", "flops"])
         print(df)
-        df.to_csv(f"logs/{today}-mem_selfattn_{model_size}_K={K}_test_nograd_AMP_Tc=1.csv")
+        df.to_csv(f"logs/{today}-mem_selfattn_{model_size}_K={K}_test_nograd_AMP_todevice_optimized.csv")
     print(time.time() - start)
