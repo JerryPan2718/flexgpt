@@ -173,27 +173,33 @@ def bench_cached(module, x, n_gen, is_profile=False):
     with torch.inference_mode():
         with PytorchTimer(verbose=False) as t:
             if is_profile:
-                with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
-                    for i in range(1, 200):
-                        x_copy = x[:]
-                        y, t1, t2, t3 = module(x)
-                        y = check_shape(y, x.shape)
-                        t1_array.append(t1)
-                        t2_array.append(t2)
-                        t3_array.append(t3)
-                        y_new = torch.randn((B, 1, H), device=device)
-                        x = check_shape(torch.cat((y, y_new), dim=-2), (B, T + i, H))
-                        mem_usage.append(torch.cuda.memory_allocated())
+                for _ in range(8):
+                        x1 = x[:]
+                        for i in range(1, 10):
+                            y, t1, t2, t3 = module(x1)
+                            y = check_shape(y, x1.shape)
+                            t1_array.append(t1)
+                            t2_array.append(t2)
+                            t3_array.append(t3)
+                            y_new = torch.randn((B, 1, H), device=device)
+                            x1 = check_shape(torch.cat((y, y_new), dim=-2), (B, T + i, H))
+                            mem_usage.append(torch.cuda.memory_allocated())
+                        module.clear_cache()
+                        module.reset_cache_counter()
 
-                    for i in range(1, 200):
-                        y, t1, t2, t3 = module(x)
-                        y = check_shape(y, x.shape)
+                with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+                    x1 = x[:]
+                    for i in range(1, 10):
+                        y, t1, t2, t3 = module(x1)
+                        y = check_shape(y, x1.shape)
                         t1_array.append(t1)
                         t2_array.append(t2)
                         t3_array.append(t3)
                         y_new = torch.randn((B, 1, H), device=device)
-                        x = check_shape(torch.cat((y, y_new), dim=-2), (B, T + i, H))
+                        x1 = check_shape(torch.cat((y, y_new), dim=-2), (B, T + i, H))
                         mem_usage.append(torch.cuda.memory_allocated())
+                    module.clear_cache()
+                    module.reset_cache_counter()
                 prof.export_chrome_trace(f"profiles/{today}-trace-token_length={x.size(1)} mem_length={module.cache_length}.json")
             else:
                 for i in range(1, n_gen + 1):
@@ -227,7 +233,7 @@ def pipeline(benchmark_function, module):
             t2_array.append(ret[3])
             t3_array.append(ret[4])
         
-        # benchmark_function(module, x, Tg, True)
+        benchmark_function(module, x, Tg, True)
 
         return [np.mean(total_time), np.std(total_time), np.mean(mem_usage) / 10 ** 6, np.std(mem_usage) / 10 ** 6, np.mean(t1_array), np.std(t1_array), np.mean(t2_array), np.std(t2_array), np.mean(t3_array), np.std(t3_array)]
 
@@ -241,16 +247,16 @@ if __name__ == "__main__":
     hparams = {"117M": (12, 768), "345M": (24, 1024), "762M": (36, 1280), "1542M": (48, 1600)}
     start = time.time()
     for model_size, hparam in hparams.items():
-        # if model_size != "117M":
-        #     continue
+        if model_size != "117M":
+            continue
         with torch.no_grad():
             with torch.autocast(device):
                 d = {}
-                Ts = [512, 256, 128] # 1024, 512, 256, 128
+                Ts = [128] # 1024, 512, 256, 128
                 K = 4
                 B, H = hparam
                 for T in Ts:
-                    Tc = T
+                    Tc = 32
                     Tg = T
                     layer0 = CachedSelfAttn(K, H, cache_length=0, B=B, T=Tc+Tg)
                     layer1 = CachedSelfAttn(K, H, cache_length=0.25 * Tg, B=B, T=Tc+Tg)
@@ -297,5 +303,5 @@ if __name__ == "__main__":
         print(d)
         df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(MB)", "mem_std(MB)", "t1_mean(s)", "t1_std(s)", "t2_mean(s)", "t2_std(s)","t3_mean(s)", "t3_std(s)", "flops"])
         print(df)
-        df.to_csv(f"logs/{today}-mem_selfattn_{model_size}_K={K}_test_nograd_AMP_todevice_optimized_t1t2t3.csv")
+        df.to_csv(f"logs/{today}-mem_selfattn_{model_size}_K={K}_test_nograd_AMP_todevice_optimized_t1t2t3_T=32.csv")
     print(time.time() - start)
