@@ -10,6 +10,11 @@ def check_shape(x, shape):
         assert False
     return x
 
+def check_device_on_cuda(x):
+    if str(x.device)[:4] != "cuda":
+        return False
+    return True
+
 # class FLOPsCounters(object):
 #     def __enter__(self):
 #         self.FLOPs = 0

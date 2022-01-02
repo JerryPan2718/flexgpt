@@ -1,4 +1,4 @@
-from utils import check_shape, CachedModule, PytorchTimer
+from utils import check_device_on_cuda, check_shape, CachedModule, PytorchTimer
 from mem_linear import CachedLinear
 import time
 import numpy as np
@@ -78,10 +78,9 @@ class CachedSelfAttn(CachedModule):
         K = self.n_head
         
         with PytorchTimer(verbose=False) as T1:
-            print(f"x.shape: {x.shape}")
-            q = self.q(x, self.i).view(B, T, K, H // K).transpose(1, 2)
-            k = self.k(x, self.i).view(B, T, K, H // K).transpose(1, 2)
-            v = self.v(x, self.i).view(B, T, K, H // K).transpose(1, 2)
+            q = self.q(x).view(B, T, K, H // K).transpose(1, 2)
+            k = self.k(x).view(B, T, K, H // K).transpose(1, 2)
+            v = self.v(x).view(B, T, K, H // K).transpose(1, 2)
         t1 = T1.elapsed
 
         with PytorchTimer(verbose=False) as T2:
@@ -99,24 +98,27 @@ class CachedSelfAttn(CachedModule):
         t3 = T3.elapsed
 
         # t1 = t2 = t3 = 0
+        if check_device_on_cuda(mask) == False:
+            print(f"mask.device: {mask.device}")
+
         return qkt, y, t1, t2, t3
     
     def forward_cached(self, x, qkt_cached, y_cached):
         B, T, H = x.size()
         K = self.n_head
 
-        qkt_cached = check_shape(qkt_cached, (B, K, T - 1 + self.i, T - 1 + self.i))
-        y_cached = check_shape(y_cached, (B, K, T - 1 + self.i, H // K))
+        qkt_cached = check_shape(qkt_cached, (B, K, T - 1, T - 1))
+        y_cached = check_shape(y_cached, (B, K, T - 1, H // K))
 
         with PytorchTimer(verbose=False) as T1:
             print(f"T: {T}")
-            print(f"self.i: {self.i}")
-            q = self.q(x).view(B, T + self.i, K, H // K).transpose(1, 2)
-            k = self.k(x).view(B, T + self.i, K, H // K).transpose(1, 2)
-            v = self.v(x).view(B, T + self.i, K, H // K).transpose(1, 2)
+            # print(f"self.i: {self.i}")
+            q = self.q(x).view(B, T, K, H // K).transpose(1, 2)
+            k = self.k(x).view(B, T, K, H // K).transpose(1, 2)
+            v = self.v(x).view(B, T, K, H // K).transpose(1, 2)
 
-            qkt = torch.zeros(B, K, T + self.i, T + self.i, device=x.device)
-            qkt[:, :, :T-1+self.i, :T-1+self.i] = qkt_cached
+            qkt = torch.zeros(B, K, T, T, device=x.device)
+            qkt[:, :, :T-1, :T-1] = qkt_cached
         t1 = T1.elapsed
 
         # qkt: BK1(H/K) * BK(H/K)T -> BK1T
@@ -125,7 +127,7 @@ class CachedSelfAttn(CachedModule):
             attn = qkt * (1.0 / math.sqrt(k.size(-1)))
         t2 = T2.elapsed
         
-        mask = self.mask[:, :, :T+self.i, :T+self.i]
+        mask = self.mask[:, :, :T, :T]
         attn = attn.masked_fill(mask == 0, float('-inf'))
         attn = F.softmax(attn, dim=-1)
         attn = self.attn_drop(attn)
@@ -152,16 +154,16 @@ class CachedSelfAttn(CachedModule):
         if (y_cached is None or qkt_cached is None) or self.cache_counter >= self.cache_length:
             self.clear_cache()
             qkt, y, t1, t2, t3 = self.forward_uncached(x)
-            self.set_cache("qkt", check_shape(qkt, (B, K, T + self.i, T + self.i)))
-            self.set_cache("y", check_shape(y, (B, K, T + self.i, H // K)))
+            self.set_cache("qkt", check_shape(qkt, (B, K, T, T)))
+            self.set_cache("y", check_shape(y, (B, K, T, H // K)))
         else:
             qkt, y, t1, t2, t3 = self.forward_cached(x, qkt_cached, y_cached)
-            self.set_cache("qkt", check_shape(qkt, (B, K, T + self.i, T + self.i)))
-            self.set_cache("y", check_shape(y, (B, K, T + self.i, H // K)))
+            self.set_cache("qkt", check_shape(qkt, (B, K, T, T)))
+            self.set_cache("y", check_shape(y, (B, K, T, H // K)))
 
-        y = y.transpose(1, 2).contiguous().view(B, T + self.i, H)
+        y = y.transpose(1, 2).contiguous().view(B, T, H)
         self.cache_counter += 1
-        self.i += 1
+        # self.i += 1
         # print(t1, t2, t3)
         return y, t1, t2, t3
 

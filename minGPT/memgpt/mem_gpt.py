@@ -1,4 +1,4 @@
-from utils import check_shape, CachedModule, PytorchTimer
+from utils import check_shape, CachedModule, PytorchTimer, check_device_on_cuda
 from mem_selfattn import CachedSelfAttn
 from mem_block import MemBlock
 import torch
@@ -48,6 +48,7 @@ class MemGPT(nn.Module):
 
         self.block_size = config.B
         self.apply(self._init_weights)
+        self.B_idx = 0
 
         logger.info("number of parameters: %e", sum(p.numel() for p in self.parameters()))
 
@@ -113,10 +114,16 @@ class MemGPT(nn.Module):
         b, t = idx.size()
         assert t <= self.block_size, "Cannot forward, model block size is exhausted."
         
-        print(f"idx.device: {idx.device}")
+        if str(idx.device)[:4] != "cuda":
+            print(f"idx.device: {idx.device}")
         
         if targets != None:
             print(f"targets: {targets}")
+        print(f"self.config.B: {self.config.B}")
+        if self.B_idx == self.config.B:
+            print(f"reset mem_gpt.B_idx: {self.B_idx}")
+            self.B_idx = 0
+        print(f"mem_gpt.B_idx: {self.B_idx}")
 
         # forward the GPT model
         token_embeddings = self.tok_emb(idx) # each index maps to a (learnable) vector
@@ -126,6 +133,8 @@ class MemGPT(nn.Module):
         x = self.ln_f(x)
         logits = self.head(x)
 
+
+        self.B_idx += 1
         # if we are given some desired targets also calculate the loss
         loss = None
         if targets is not None:
