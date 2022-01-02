@@ -82,7 +82,7 @@ train_dataset = CharDataset(text, block_size) # one line of poem is roughly 50 c
 
 from mem_gpt import MemGPT, MemGPTConfig
 mem_config = MemGPTConfig(train_dataset.vocab_size, train_dataset.block_size,
-    B=8, K=8, H=512)
+    B=12, K=4, H=768)
 model = MemGPT(mem_config)
 print("=" * 50)
 
@@ -100,7 +100,7 @@ print("=" * 50)
 from mem_utils import sample
 context = "O God, O God!"
 x = torch.tensor([train_dataset.stoi[s] for s in context], dtype=torch.long)[None,...].to(trainer.device)
-
+print(f"x.shape in mem_demo: {x.shape}")
 # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
 #     with record_function("model_inference"):
 start_time = time.time()

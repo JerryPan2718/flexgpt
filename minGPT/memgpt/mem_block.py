@@ -21,12 +21,11 @@ class MemBlock(nn.Module):
             nn.Dropout(config.resid_pdrop),
         )
     def forward(self, x):
-        print(self.attn(self.ln1(x))[0].shape)
-        print(x.shape)
-        self.config.T += 1
+        # self.config.T += 1
+        print(f"before forward: {x.shape}")
         x = x + self.attn(self.ln1(x))[0]
-        print(x.shape)
         x = x + self.mlp(self.ln2(x))
+        print(f"after forward: {x.shape}")
         return x
 
 

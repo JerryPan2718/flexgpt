@@ -46,11 +46,12 @@ class CachedSelfAttn(CachedModule):
         self.attn_drop = nn.Dropout(dropout)
         self.resid_drop = nn.Dropout(dropout)
         self.proj = CachedLinear(n_hidden, n_hidden)
-        self.register_buffer("mask", torch.tril(torch.ones(max_t, max_t)).view(1, 1, max_t, max_t))
+        self.register_buffer("mask", torch.tril(torch.ones(max_t, max_t, device=self.device)).view(1, 1, max_t, max_t))
         self.n_head = n_head
         self.n_hidden = n_hidden
         self.cache_counter = 0
         self.cache_length = cache_length
+        self.i = 0
     
     def clear_cache(self):
         self.q.clear_cache()
@@ -77,9 +78,10 @@ class CachedSelfAttn(CachedModule):
         K = self.n_head
         
         with PytorchTimer(verbose=False) as T1:
-            q = self.q(x).view(B, T, K, H // K).transpose(1, 2)
-            k = self.k(x).view(B, T, K, H // K).transpose(1, 2)
-            v = self.v(x).view(B, T, K, H // K).transpose(1, 2)
+            print(f"x.shape: {x.shape}")
+            q = self.q(x, self.i).view(B, T, K, H // K).transpose(1, 2)
+            k = self.k(x, self.i).view(B, T, K, H // K).transpose(1, 2)
+            v = self.v(x, self.i).view(B, T, K, H // K).transpose(1, 2)
         t1 = T1.elapsed
 
         with PytorchTimer(verbose=False) as T2:
@@ -88,7 +90,7 @@ class CachedSelfAttn(CachedModule):
         t2 = T2.elapsed
 
         
-        mask = self.mask[:, :, :T, :T].to(self.device)
+        mask = self.mask[:, :, :T, :T]
         attn = attn.masked_fill(mask == 0, float('-inf'))
         attn = F.softmax(attn, dim=-1)
         attn = self.attn_drop(attn)
@@ -103,16 +105,18 @@ class CachedSelfAttn(CachedModule):
         B, T, H = x.size()
         K = self.n_head
 
-        qkt_cached = check_shape(qkt_cached, (B, K, T - 1, T - 1))
-        y_cached = check_shape(y_cached, (B, K, T - 1, H // K))
+        qkt_cached = check_shape(qkt_cached, (B, K, T - 1 + self.i, T - 1 + self.i))
+        y_cached = check_shape(y_cached, (B, K, T - 1 + self.i, H // K))
 
         with PytorchTimer(verbose=False) as T1:
-            q = self.q(x).view(B, T, K, H // K).transpose(1, 2)
-            k = self.k(x).view(B, T, K, H // K).transpose(1, 2)
-            v = self.v(x).view(B, T, K, H // K).transpose(1, 2)
+            print(f"T: {T}")
+            print(f"self.i: {self.i}")
+            q = self.q(x).view(B, T + self.i, K, H // K).transpose(1, 2)
+            k = self.k(x).view(B, T + self.i, K, H // K).transpose(1, 2)
+            v = self.v(x).view(B, T + self.i, K, H // K).transpose(1, 2)
 
-            qkt = torch.zeros(B, K, T, T, device=x.device)
-            qkt[:, :, :T-1, :T-1] = qkt_cached
+            qkt = torch.zeros(B, K, T + self.i, T + self.i, device=x.device)
+            qkt[:, :, :T-1+self.i, :T-1+self.i] = qkt_cached
         t1 = T1.elapsed
 
         # qkt: BK1(H/K) * BK(H/K)T -> BK1T
@@ -121,7 +125,7 @@ class CachedSelfAttn(CachedModule):
             attn = qkt * (1.0 / math.sqrt(k.size(-1)))
         t2 = T2.elapsed
         
-        mask = self.mask[:, :, :T, :T].to(x.device)
+        mask = self.mask[:, :, :T+self.i, :T+self.i]
         attn = attn.masked_fill(mask == 0, float('-inf'))
         attn = F.softmax(attn, dim=-1)
         attn = self.attn_drop(attn)
@@ -148,15 +152,16 @@ class CachedSelfAttn(CachedModule):
         if (y_cached is None or qkt_cached is None) or self.cache_counter >= self.cache_length:
             self.clear_cache()
             qkt, y, t1, t2, t3 = self.forward_uncached(x)
-            self.set_cache("qkt", check_shape(qkt, (B, K, T, T)))
-            self.set_cache("y", check_shape(y, (B, K, T, H // K)))
+            self.set_cache("qkt", check_shape(qkt, (B, K, T + self.i, T + self.i)))
+            self.set_cache("y", check_shape(y, (B, K, T + self.i, H // K)))
         else:
             qkt, y, t1, t2, t3 = self.forward_cached(x, qkt_cached, y_cached)
-            self.set_cache("qkt", check_shape(qkt, (B, K, T, T)))
-            self.set_cache("y", check_shape(y, (B, K, T, H // K)))
+            self.set_cache("qkt", check_shape(qkt, (B, K, T + self.i, T + self.i)))
+            self.set_cache("y", check_shape(y, (B, K, T + self.i, H // K)))
 
-        y = y.transpose(1, 2).contiguous().view(B, T, H)
+        y = y.transpose(1, 2).contiguous().view(B, T + self.i, H)
         self.cache_counter += 1
+        self.i += 1
         # print(t1, t2, t3)
         return y, t1, t2, t3
 
@@ -233,7 +238,7 @@ def pipeline(benchmark_function, module):
             t2_array.append(ret[3])
             t3_array.append(ret[4])
         
-        benchmark_function(module, x, Tg, True)
+        # benchmark_function(module, x, Tg, True)
 
         return [np.mean(total_time), np.std(total_time), np.mean(mem_usage) / 10 ** 6, np.std(mem_usage) / 10 ** 6, np.mean(t1_array), np.std(t1_array), np.mean(t2_array), np.std(t2_array), np.mean(t3_array), np.std(t3_array)]
 

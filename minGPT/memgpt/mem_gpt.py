@@ -112,6 +112,11 @@ class MemGPT(nn.Module):
     def forward(self, idx, targets=None):
         b, t = idx.size()
         assert t <= self.block_size, "Cannot forward, model block size is exhausted."
+        
+        print(f"idx.device: {idx.device}")
+        
+        if targets != None:
+            print(f"targets: {targets}")
 
         # forward the GPT model
         token_embeddings = self.tok_emb(idx) # each index maps to a (learnable) vector
