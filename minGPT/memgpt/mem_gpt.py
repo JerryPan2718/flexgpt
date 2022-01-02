@@ -6,6 +6,8 @@ import torch.nn as nn
 from torch.nn import functional as F
 from loguru import logger
 
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
 class MemGPTConfig:
     """ base GPT config, params common to all GPT versions """
     embd_pdrop = 0.1
@@ -119,10 +121,10 @@ class MemGPT(nn.Module):
         
         if targets != None:
             print(f"targets: {targets}")
-        print(f"self.config.B: {self.config.B}")
-        if self.B_idx == self.config.B:
-            print(f"reset mem_gpt.B_idx: {self.B_idx}")
-            self.B_idx = 0
+        # print(f"self.config.B: {self.config.B}")
+        # if self.B_idx == self.config.B:
+        #     print(f"reset mem_gpt.B_idx: {self.B_idx}")
+        #     self.B_idx = 0
         print(f"mem_gpt.B_idx: {self.B_idx}")
 
         # forward the GPT model
@@ -133,6 +135,10 @@ class MemGPT(nn.Module):
         x = self.ln_f(x)
         logits = self.head(x)
 
+        B, T, H = x.shape
+        y_new = torch.randn((B, 1, H), device=device)
+        y = x
+        x = check_shape(torch.cat((y, y_new), dim=-2), (B, T + 1, H))
 
         self.B_idx += 1
         # if we are given some desired targets also calculate the loss
