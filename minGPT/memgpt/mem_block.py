@@ -40,7 +40,7 @@ class MemBlock(nn.Module):
         y_new = torch.randn((B, 1, H), device=self.attn.device)
         x = check_shape(torch.cat((y, y_new), dim=-2), (B, T + 1, H))
 
-        self.B_idx += 1
+        self.B_idx += 1 
         # print(f"after forward: {x.shape}")
 
         if check_device_on_cuda(x) == False:
