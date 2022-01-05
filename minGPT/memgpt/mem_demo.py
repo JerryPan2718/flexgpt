@@ -16,7 +16,13 @@ from torch.nn import functional as F
 import math
 from torch.utils.data import Dataset
 import time
+import datetime
 from torch.profiler import profile, record_function, ProfilerActivity
+
+today = datetime.date.today()
+CUDA_VISIBLE_DEVICES = 1
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+print(device)
 
 class CharDataset(Dataset):
 
@@ -80,37 +86,60 @@ block_size = 2048 # spatial extent of the model for its context
 text = open('input.txt', 'r').read() # don't worry we won't run out of file handles
 train_dataset = CharDataset(text, block_size) # one line of poem is roughly 50 characters
 
-from mem_gpt import MemGPT, MemGPTConfig
-mem_config = MemGPTConfig(train_dataset.vocab_size, train_dataset.block_size,
-    B=12, K=4, H=768)
-model = MemGPT(mem_config)
-print("=" * 50)
+def model_init(B, K, H, cache_length):
+    from mem_gpt import MemGPT, MemGPTConfig
+    mem_config = MemGPTConfig(train_dataset.vocab_size, train_dataset.block_size,
+        B=12, K=4, H=768, cache_length=0)
+    model = MemGPT(mem_config)
+    print("=" * 50)
 
-from mem_trainer import MemTrainer, MemTrainerConfig
+    from mem_trainer import MemTrainer, MemTrainerConfig
 
-# initialize a trainer instance and kick off training
-tconf = MemTrainerConfig(max_epochs=1, batch_size=128, learning_rate=6e-4,
-                      lr_decay=True, warmup_tokens=512*20, final_tokens=2*len(train_dataset)*block_size,
-                      num_workers=4)
-trainer = MemTrainer(model, train_dataset, None, tconf)
-trainer.train()
-print("=" * 50)
+    # initialize a trainer instance and kick off training
+    tconf = MemTrainerConfig(max_epochs=1, batch_size=128, learning_rate=6e-4,
+                        lr_decay=True, warmup_tokens=512*20, final_tokens=2*len(train_dataset)*block_size,
+                        num_workers=4)
+    trainer = MemTrainer(model, train_dataset, None, tconf)
+    trainer.train()
+    print("=" * 50)
+    return model, trainer
 
-# alright, let's sample some character-level Shakespeare
-from mem_utils import sample
-context = "O God, O God!"
-x = torch.tensor([train_dataset.stoi[s] for s in context], dtype=torch.long)[None,...].to(trainer.device)
-print(f"x.shape in mem_demo: {x.shape}")
-# with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
-#     with record_function("model_inference"):
-start_time = time.time()
-y = sample(model, x, 2000, temperature=1.0, sample=True, top_k=10)[0]
-end_time = time.time()
-print("######################################################################")
-# print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
-        
+def model_sampling(model, trainer):
+    from mem_utils import sample
+    context = "O God, O God!"
+    x = torch.tensor([train_dataset.stoi[s] for s in context], dtype=torch.long)[None,...].to(trainer.device)
+    print(f"x.shape in mem_demo: {x.shape}")
+    # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
+    #     with record_function("model_inference"):
+    y = sample(model, x, 2000, temperature=1.0, sample=True, top_k=10)[0]
+    print("######################################################################")
+    # print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
+    return y
+
+if __name__ == "__main__":
+    hparams = {"117M": (12, 768), "345M": (24, 1024), "762M": (36, 1280), "1542M": (48, 1600)}
+    cache_lengths = [0, 0.25, 0.5, 0.5, 1]
+    with torch.no_grad():
+        with torch.autocast(device):
+    for hparam in hparams:
+        B, H = hparam
+        K = 4
+        for cache_length in cache_lengths:
+            model, trainer = model_init(B, K, H, cache_length)
+
+            # warmup
+            for _ in range(4):
+                model_sampling(model, trainer)
+            
+            # timing module
+            for _ in range(8):
+                model_sampling(model, trainer)
+
+
 completion = ''.join([train_dataset.itos[int(i)] for i in y])
 print(completion)
+
+
 print("Inference Time: " + str(end_time - start_time) + " seconds")
 
 

@@ -18,7 +18,7 @@ class CachedLinear(CachedModule):
         CachedModule.__init__(self, x)
         self.layer = nn.Linear(in_features, out_features, bias, **kwargs, device=self.device)
 
-    def forward(self, x, i=0):
+    def forward(self, x):
         """ 
         x: BTH 
         cache: B(T-1)H  
@@ -26,11 +26,11 @@ class CachedLinear(CachedModule):
         """
         B, T, _ = x.shape
         if self.cache is not None:
-            cache = check_shape(self.cache, (B, T - 1 + i, self.layer.out_features))
+            cache = check_shape(self.cache, (B, T - 1, self.layer.out_features))
             new_out = check_shape(self.layer(x[:, -1:, :]), (B, 1, self.layer.out_features))
             y = torch.cat([cache, new_out], dim=1)  
         else:
-           y = check_shape(self.layer(x), (B, T + i, self.layer.out_features))
+           y = check_shape(self.layer(x), (B, T, self.layer.out_features))
         self.set_cache(y)
         return y
 

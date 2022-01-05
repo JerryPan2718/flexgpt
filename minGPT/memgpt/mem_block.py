@@ -13,7 +13,7 @@ class MemBlock(nn.Module):
         self.config = config
         self.ln1 = nn.LayerNorm(config.H)
         self.ln2 = nn.LayerNorm(config.H)
-        self.attn = CachedSelfAttn(config.K, config.H, cache_length=128)
+        self.attn = CachedSelfAttn(config.K, config.H, cache_length=config.cache_length)
         self.mlp = nn.Sequential(
             nn.Linear(config.H, 4 * config.H),
             nn.GELU(),
@@ -36,10 +36,10 @@ class MemBlock(nn.Module):
         #     # x = check_shape(torch.cat((y, y_new), dim=-2), (B, T + 1, H))
         # print(f"mem_block.B_idx: {self.B_idx}")
         # print(f"before forward: {x.shape}")
-        x = x + self.attn(self.ln1(x))[0]
+        x = x + self.attn(self.ln1(x))[1]
         x = x + self.mlp(self.ln2(x))
 
-        self.B_idx += 1 
+        # self.B_idx += 1 
         # print(f"after forward: {x.shape}")
 
         if check_device_on_cuda(x) == False:

@@ -125,22 +125,25 @@ class MemGPT(nn.Module):
         # if self.B_idx == self.config.B:
         #     print(f"reset mem_gpt.B_idx: {self.B_idx}")
         #     self.B_idx = 0
-        print(f"mem_gpt.B_idx: {self.B_idx}")
+        # print(f"mem_gpt.B_idx: {self.B_idx}")
 
         # forward the GPT model
         token_embeddings = self.tok_emb(idx) # each index maps to a (learnable) vector
         position_embeddings = self.pos_emb[:, :t, :] # each position maps to a (learnable) vector
         x = self.drop(token_embeddings + position_embeddings)
+        print(f"before blocks: {x.shape}")
         x = self.blocks(x)
+        print(f"after blocks: {x.shape}")
         x = self.ln_f(x)
         logits = self.head(x)
 
-        B, T, H = x.shape
-        y_new = torch.randn((B, 1, H), device=device)
-        y = x
-        x = check_shape(torch.cat((y, y_new), dim=-2), (B, T + 1, H))
 
-        self.B_idx += 1
+        # B, T, H = x.shape
+        # y_new = torch.randn((B, 1, H), device=device)
+        # y = x
+        # x = check_shape(torch.cat((y, y_new), dim=-2), (B, T + 1, H))
+
+        # self.B_idx += 1
         # if we are given some desired targets also calculate the loss
         loss = None
         if targets is not None:

@@ -49,6 +49,7 @@ class CachedSelfAttn(CachedModule):
         self.register_buffer("mask", torch.tril(torch.ones(max_t, max_t, device=self.device)).view(1, 1, max_t, max_t))
         self.n_head = n_head
         self.n_hidden = n_hidden
+        # self.cache = {}
         self.cache_counter = 0
         self.cache_length = cache_length
         self.i = 0
@@ -94,7 +95,7 @@ class CachedSelfAttn(CachedModule):
         attn = F.softmax(attn, dim=-1)
         attn = self.attn_drop(attn)
         with PytorchTimer(verbose=False) as T3:
-            y = attn @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+            y = attn @ v # (B, K, T, T) x (B, K, T, H/K) -> (B, K, T, T/K)
         t3 = T3.elapsed
 
         # t1 = t2 = t3 = 0
@@ -102,23 +103,34 @@ class CachedSelfAttn(CachedModule):
             print(f"mask.device: {mask.device}")
 
         return qkt, y, t1, t2, t3
-    
-    def forward_cached(self, x, qkt_cached, y_cached):
+
+    def forward_cached(self, x, qkt_cached, y_cached, restore_dim=True):
+        B, T, H = x.size()
+        x_new = torch.randn((B, self.i, H), device=device)
+        x = torch.cat((x, x_new), dim=-2)
         B, T, H = x.size()
         K = self.n_head
 
-        qkt_cached = check_shape(qkt_cached, (B, K, T - 1, T - 1))
-        y_cached = check_shape(y_cached, (B, K, T - 1, H // K))
+        # if restore_dim:
+        #     T += 1 
 
+        # qkt_cached = qkt_cached[:, :, :-1, :-1]
+        # y_cached = y_cached[:, :, :-1, :]
+
+        qkt_cached = check_shape(qkt_cached, (B, K, T - self.i, T - self.i))
+        y_cached = check_shape(y_cached, (B, K, T - self.i, H // K))
+        
         with PytorchTimer(verbose=False) as T1:
-            print(f"T: {T}")
-            # print(f"self.i: {self.i}")
+            print(f"self.i: {self.i}")
+            # x: (B, T1 + 1, H)
             q = self.q(x).view(B, T, K, H // K).transpose(1, 2)
             k = self.k(x).view(B, T, K, H // K).transpose(1, 2)
             v = self.v(x).view(B, T, K, H // K).transpose(1, 2)
 
             qkt = torch.zeros(B, K, T, T, device=x.device)
-            qkt[:, :, :T-1, :T-1] = qkt_cached
+            print(f"qkt_cached: {qkt_cached.shape}")
+            print(f"qkt: {qkt[:, :, :T-self.i, :T-self.i].shape}, T: {T}")
+            qkt[:, :, :T-self.i, :T-self.i] = qkt_cached
         t1 = T1.elapsed
 
         # qkt: BK1(H/K) * BK(H/K)T -> BK1T
@@ -140,9 +152,15 @@ class CachedSelfAttn(CachedModule):
         t3 = T3.elapsed
 
         # t1 = t2 = t3 = 0
+        qkt = qkt[:, :, :-1 * self.i, :-1 * self.i]
+        y = y[:, :, :-1, :]
+        x = x[:, :-1 * self.i, :]
+
         return qkt, y, t1, t2, t3
 
     def forward(self, x):
+        # print(self.cache.keys())
+
         B, T, H = x.size()
         K = self.n_head
         assert H == self.n_hidden
@@ -163,7 +181,7 @@ class CachedSelfAttn(CachedModule):
 
         y = y.transpose(1, 2).contiguous().view(B, T, H)
         self.cache_counter += 1
-        # self.i += 1
+        self.i += 1
         # print(t1, t2, t3)
         return y, t1, t2, t3
 
@@ -224,23 +242,26 @@ def pipeline(benchmark_function, module):
         t1_array = []
         t2_array = []
         t3_array = []
-        # warmup
-        for i in tqdm(range(4)):
-            benchmark_function(module, x, Tg)
 
-        # bench
-        total_time = []
-        mem_usage = []
-        # FLOP = []
-        for i in tqdm(range(8)):
-            ret = benchmark_function(module, x, Tg, False)
-            total_time.append(ret[0])    
-            mem_usage += ret[1]
-            t1_array.append(ret[2])
-            t2_array.append(ret[3])
-            t3_array.append(ret[4])
-        
-        # benchmark_function(module, x, Tg, True)
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            # warmup
+            for i in tqdm(range(4)):
+                benchmark_function(module, x, Tg)
+
+            # bench
+            total_time = []
+            mem_usage = []
+            # FLOP = []
+            for i in tqdm(range(8)):
+                ret = benchmark_function(module, x, Tg, False)
+                total_time.append(ret[0])    
+                mem_usage += ret[1]
+                t1_array.append(ret[2])
+                t2_array.append(ret[3])
+                t3_array.append(ret[4])
+            
+            # benchmark_function(module, x, Tg, True)
+        # prof.export_chrome_trace(f"profiles/{today}-full-trace-token_length={x.size(1)} mem_length={module.cache_length}.json")
 
         return [np.mean(total_time), np.std(total_time), np.mean(mem_usage) / 10 ** 6, np.std(mem_usage) / 10 ** 6, np.mean(t1_array), np.std(t1_array), np.mean(t2_array), np.std(t2_array), np.mean(t3_array), np.std(t3_array)]
 
