@@ -111,25 +111,18 @@ class CachedSelfAttn(CachedModule):
         B, T, H = x.size()
         K = self.n_head
 
-        # if restore_dim:
-        #     T += 1 
-
-        # qkt_cached = qkt_cached[:, :, :-1, :-1]
-        # y_cached = y_cached[:, :, :-1, :]
-
         qkt_cached = check_shape(qkt_cached, (B, K, T - self.i, T - self.i))
         y_cached = check_shape(y_cached, (B, K, T - self.i, H // K))
         
         with PytorchTimer(verbose=False) as T1:
-            print(f"self.i: {self.i}")
-            # x: (B, T1 + 1, H)
+            # print(f"self.i: {self.i}")
             q = self.q(x).view(B, T, K, H // K).transpose(1, 2)
             k = self.k(x).view(B, T, K, H // K).transpose(1, 2)
             v = self.v(x).view(B, T, K, H // K).transpose(1, 2)
 
             qkt = torch.zeros(B, K, T, T, device=x.device)
-            print(f"qkt_cached: {qkt_cached.shape}")
-            print(f"qkt: {qkt[:, :, :T-self.i, :T-self.i].shape}, T: {T}")
+            # print(f"qkt_cached: {qkt_cached.shape}")
+            # print(f"qkt: {qkt[:, :, :T-self.i, :T-self.i].shape}, T: {T}")
             qkt[:, :, :T-self.i, :T-self.i] = qkt_cached
         t1 = T1.elapsed
 

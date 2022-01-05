@@ -31,7 +31,7 @@ def sample(model, x, steps, temperature=1.0, sample=False, top_k=None):
         x_cond = x if x.size(1) <= block_size else x[:, -block_size:]
         # x_cond = x if x.size(1) <= block_size else x[:, :] # Use all previous tokens as Auto-regressive model
         
-        print(f"sample x_cond.shape: {x_cond.shape}")
+        # print(f"sample x_cond.shape: {x_cond.shape}")
         logits, _ = model(x_cond)
         # pluck the logits at the final step and scale by temperature
         logits = logits[:, -1, :] / temperature
@@ -50,6 +50,6 @@ def sample(model, x, steps, temperature=1.0, sample=False, top_k=None):
         x = torch.cat((x, ix), dim=1)
         # print(x.shape)
         # print(x_cond.shape)
-        print(f"sample x.shape: {x.shape}")
+        # print(f"sample x.shape: {x.shape}")
 
     return x

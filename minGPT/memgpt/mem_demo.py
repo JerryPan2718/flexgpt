@@ -8,6 +8,7 @@ logging.basicConfig(
 
 # make deterministic
 from mem_utils import set_seed
+from utils import check_shape, CachedModule, PytorchTimer, check_device_on_cuda
 set_seed(2718)
 import numpy as np
 import torch
@@ -18,11 +19,11 @@ from torch.utils.data import Dataset
 import time
 import datetime
 from torch.profiler import profile, record_function, ProfilerActivity
+import pandas as pd
 
 today = datetime.date.today()
 CUDA_VISIBLE_DEVICES = 1
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-print(device)
 
 class CharDataset(Dataset):
 
@@ -104,43 +105,45 @@ def model_init(B, K, H, cache_length):
     print("=" * 50)
     return model, trainer
 
-def model_sampling(model, trainer):
+def model_sampling(model, trainer, steps):
     from mem_utils import sample
     context = "O God, O God!"
     x = torch.tensor([train_dataset.stoi[s] for s in context], dtype=torch.long)[None,...].to(trainer.device)
-    print(f"x.shape in mem_demo: {x.shape}")
-    # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
-    #     with record_function("model_inference"):
-    y = sample(model, x, 2000, temperature=1.0, sample=True, top_k=10)[0]
-    print("######################################################################")
-    # print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
+    # print(f"Tc: {x.shape[1]}")
+    y = sample(model, x, steps, temperature=1.0, sample=True, top_k=10)[0]
     return y
 
 if __name__ == "__main__":
     hparams = {"117M": (12, 768), "345M": (24, 1024), "762M": (36, 1280), "1542M": (48, 1600)}
     cache_lengths = [0, 0.25, 0.5, 0.5, 1]
-    with torch.no_grad():
-        with torch.autocast(device):
-    for hparam in hparams:
+    d = {}
+    Tgs = [256, 512, 1024]
+    start = time.time()
+    for model_size, hparam in hparams.items():
         B, H = hparam
         K = 4
-        for cache_length in cache_lengths:
-            model, trainer = model_init(B, K, H, cache_length)
+        for Tg in Tgs:
+            for cache_length in cache_lengths:
+                with torch.no_grad():
+                    with torch.autocast(device):
+                        model, trainer = model_init(B, K, H, cache_length * Tg)
+                        print(f"Tg={Tg} model_size={model_size} cache_length={cache_length * Tg}")
+                        # warmup
+                        for _ in range(4):
+                            y = model_sampling(model, trainer, Tg)
+                        
+                        total_time = []
+                        # timing module
+                        for _ in range(8):
+                            with PytorchTimer(verbose=False) as t:
+                                y = model_sampling(model, trainer, Tg)
+                            total_time.append(t.elapsed)
+                        d[f"model_size={model_size} Tg={Tg} cache_length={0}"] = [np.mean(total_time), np.std(total_time)]
 
-            # warmup
-            for _ in range(4):
-                model_sampling(model, trainer)
-            
-            # timing module
-            for _ in range(8):
-                model_sampling(model, trainer)
-
-
-completion = ''.join([train_dataset.itos[int(i)] for i in y])
-print(completion)
-
-
-print("Inference Time: " + str(end_time - start_time) + " seconds")
-
-
-
+    print(d)
+    df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)"])
+    print(df)
+    df.to_csv(f"logs/{today}-mem_demo-{model_size}_K={K}.csv")
+print(time.time() - start)
+# completion = ''.join([train_dataset.itos[int(i)] for i in y])
+# print(completion)
