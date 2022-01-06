@@ -129,16 +129,16 @@ if __name__ == "__main__":
                         model, trainer = model_init(B, K, H, cache_length * Tg)
                         print(f"Tg={Tg} model_size={model_size} cache_length={cache_length * Tg}")
                         # warmup
-                        for _ in range(4):
+                        for _ in range(1):
                             y = model_sampling(model, trainer, Tg)
                         
                         total_time = []
                         # timing module
-                        for _ in range(8):
+                        for _ in range(1):
                             with PytorchTimer(verbose=False) as t:
                                 y = model_sampling(model, trainer, Tg)
                             total_time.append(t.elapsed)
-                        d[f"model_size={model_size} Tg={Tg} cache_length={0}"] = [np.mean(total_time), np.std(total_time)]
+                        d[f"model_size={model_size} Tg={Tg} cache_length={cache_length * Tg}"] = [np.mean(total_time), np.std(total_time)]
 
     print(d)
     df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)"])
