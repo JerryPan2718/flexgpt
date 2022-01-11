@@ -232,31 +232,31 @@ def bench_cached(module, x, n_gen, is_profile=False):
     return t.elapsed, mem_usage, np.sum(t1_array), np.sum(t2_array), np.sum(t3_array)
 
 def pipeline(benchmark_function, module):
-        t1_array = []
-        t2_array = []
-        t3_array = []
+    t1_array = []
+    t2_array = []
+    t3_array = []
 
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
-            # warmup
-            for i in tqdm(range(4)):
-                benchmark_function(module, x, Tg)
+    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+        # warmup
+        for i in tqdm(range(4)):
+            benchmark_function(module, x, Tg)
 
-            # bench
-            total_time = []
-            mem_usage = []
-            # FLOP = []
-            for i in tqdm(range(8)):
-                ret = benchmark_function(module, x, Tg, False)
-                total_time.append(ret[0])    
-                mem_usage += ret[1]
-                t1_array.append(ret[2])
-                t2_array.append(ret[3])
-                t3_array.append(ret[4])
-            
-            # benchmark_function(module, x, Tg, True)
-        # prof.export_chrome_trace(f"profiles/{today}-full-trace-token_length={x.size(1)} mem_length={module.cache_length}.json")
+        # bench
+        total_time = []
+        mem_usage = []
+        # FLOP = []
+        for i in tqdm(range(8)):
+            ret = benchmark_function(module, x, Tg, False)
+            total_time.append(ret[0])    
+            mem_usage += ret[1]
+            t1_array.append(ret[2])
+            t2_array.append(ret[3])
+            t3_array.append(ret[4])
+        
+        # benchmark_function(module, x, Tg, True)
+    # prof.export_chrome_trace(f"profiles/{today}-full-trace-token_length={x.size(1)} mem_length={module.cache_length}.json")
 
-        return [np.mean(total_time), np.std(total_time), np.mean(mem_usage) / 10 ** 6, np.std(mem_usage) / 10 ** 6, np.mean(t1_array), np.std(t1_array), np.mean(t2_array), np.std(t2_array), np.mean(t3_array), np.std(t3_array)]
+    return [np.mean(total_time), np.std(total_time), np.mean(mem_usage) / 10 ** 6, np.std(mem_usage) / 10 ** 6, np.mean(t1_array), np.std(t1_array), np.mean(t2_array), np.std(t2_array), np.mean(t3_array), np.std(t3_array)]
 
 
 if __name__ == "__main__":

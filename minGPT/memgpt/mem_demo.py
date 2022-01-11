@@ -120,6 +120,8 @@ if __name__ == "__main__":
     Tgs = [256, 512, 1024]
     start = time.time()
     for model_size, hparam in hparams.items():
+        if model_size != "1542M":
+            continue
         B, H = hparam
         K = 4
         for Tg in Tgs:
