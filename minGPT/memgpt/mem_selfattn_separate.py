@@ -31,7 +31,7 @@ class CachedSelfAttn(CachedModule):
         """
         q: BKT(H/K)
         k: BKT(H/K)
-        v: BKT(H/K)
+        v: BKT(H/K) 
         qkt: BKTT
         """
         super().__init__(dict(qkt=None, y=None))
