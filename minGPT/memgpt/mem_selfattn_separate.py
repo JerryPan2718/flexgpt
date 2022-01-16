@@ -269,7 +269,7 @@ if __name__ == "__main__":
         with torch.no_grad():
             with torch.cuda.amp.autocast():
                 d = {}
-                Ts = [128] # 1024, 512, 256, 128
+                Ts = [512, 256, 128] # 1024, 512, 256, 128
                 K = 4
                 B, H = hparam
                 for T in Ts:
@@ -320,5 +320,5 @@ if __name__ == "__main__":
         print(d)
         df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(MB)", "mem_std(MB)", "t1_mean(s)", "t1_std(s)", "t2_mean(s)", "t2_std(s)","t3_mean(s)", "t3_std(s)", "flops"])
         print(df)
-        df.to_csv(f"logs/{today}-mem_selfattn_{model_size}_K={K}_test_nograd_AMP_todevice_optimized_t1t2t3_T=32.csv")
+        df.to_csv(f"logs/{today}-mem_selfattn_{model_size}_K={K}_test_nograd_AMP_todevice_optimized_t1t2t3_T=32_Ts*4.csv")
     print(time.time() - start)
