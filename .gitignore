@@ -1,5 +1,5 @@
 transformer-xl-benchmark/data/
-
+cuda_11.6.0_510.39.01_linux.run
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

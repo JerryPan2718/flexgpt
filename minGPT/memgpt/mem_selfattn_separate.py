@@ -24,7 +24,8 @@ logging.basicConfig(level=logging.DEBUG)
 
 CUDA_VISIBLE_DEVICES = 1
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-print(device)
+NUMEXPR_MAX_THREADS = 1
+print(f"device: {device} NUMEXPR_MAX_THREADS: {NUMEXPR_MAX_THREADS}")
 
 class CachedSelfAttn(CachedModule):
     def __init__(self, n_head, n_hidden, dropout=0.1, max_t=2048, cache_length=64, B=12, T=2048):
@@ -266,7 +267,7 @@ if __name__ == "__main__":
         if model_size != "117M":
             continue
         with torch.no_grad():
-            with torch.autocast(device):
+            with torch.cuda.amp.autocast():
                 d = {}
                 Ts = [128] # 1024, 512, 256, 128
                 K = 4
