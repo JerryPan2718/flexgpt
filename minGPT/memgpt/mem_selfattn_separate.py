@@ -264,7 +264,7 @@ if __name__ == "__main__":
     hparams = {"117M": (12, 768), "345M": (24, 1024), "762M": (36, 1280), "1542M": (48, 1600)}
     start = time.time()
     for model_size, hparam in hparams.items():
-        if model_size != "117M":
+        if model_size != "1542M":
             continue
         with torch.no_grad():
             with torch.cuda.amp.autocast():
