@@ -273,7 +273,7 @@ if __name__ == "__main__":
                 K = 4
                 B, H = hparam
                 for T in Ts:
-                    Tc = 32
+                    Tc = T // 2
                     Tg = T
                     layer0 = CachedSelfAttn(K, H, cache_length=0, B=B, T=Tc+Tg)
                     layer1 = CachedSelfAttn(K, H, cache_length=0.25 * Tg, B=B, T=Tc+Tg)
