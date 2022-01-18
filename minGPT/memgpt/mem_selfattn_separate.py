@@ -75,81 +75,91 @@ class CachedSelfAttn(CachedModule):
     def reset_cache_counter(self):
         self.cache_counter = 0
     
+    def check_if_contiguous(self, arg_list):
+        for arg in arg_list:
+            if arg.is_contiguous() == False:
+                print(f"{str(arg)}: is not contiguous")
+    
     def forward_uncached(self, x):
         B, T, H = x.size()
         K = self.n_head
         
-        with PytorchTimer(verbose=False) as T1:
-            q = self.q(x).view(B, T, K, H // K).transpose(1, 2)
-            k = self.k(x).view(B, T, K, H // K).transpose(1, 2)
-            v = self.v(x).view(B, T, K, H // K).transpose(1, 2)
-        t1 = T1.elapsed
+        # with PytorchTimer(verbose=False) as T1:
+        q = self.q(x).view(B, T, K, H // K).transpose(1, 2).contiguous()
+        k = self.k(x).view(B, T, K, H // K).transpose(1, 2).contiguous()
+        v = self.v(x).view(B, T, K, H // K).transpose(1, 2).contiguous()
+        # t1 = T1.elapsed
 
-        with PytorchTimer(verbose=False) as T2:
-            qkt = q @ k.transpose(-2, -1) 
-            attn = qkt * (1.0 / math.sqrt(k.size(-1)))
-        t2 = T2.elapsed
+        # with PytorchTimer(verbose=False) as T2:
+        qkt = q @ k.transpose(-2, -1) 
+        attn = qkt * (1.0 / math.sqrt(k.size(-1)))
+        # print(f"qkt_uncached: {qkt.is_contiguous()}")
+        # t2 = T2.elapsed
 
         
-        mask = self.mask[:, :, :T, :T]
+        mask = self.mask[:, :, :T, :T].contiguous()
         attn = attn.masked_fill(mask == 0, float('-inf'))
         attn = F.softmax(attn, dim=-1)
-        attn = self.attn_drop(attn)
-        with PytorchTimer(verbose=False) as T3:
-            y = attn @ v # (B, K, T, T) x (B, K, T, H/K) -> (B, K, T, T/K)
-        t3 = T3.elapsed
+        attn = self.attn_drop(attn).contiguous()
+        # with PytorchTimer(verbose=False) as T3:
+        y = attn @ v # (B, K, T, T) x (B, K, T, H/K) -> (B, K, T, T/K)
+            # print(f"y_uncached: {y.is_contiguous()}")
+        # t3 = T3.elapsed
 
-        # t1 = t2 = t3 = 0
-        if check_device_on_cuda(mask) == False:
-            print(f"mask.device: {mask.device}")
-
+        t1 = t2 = t3 = 0
+        # if check_device_on_cuda(mask) == False:
+        #     print(f"mask.device: {mask.device}")
+        # self.check_if_contiguous([y, attn, v, mask, qkt])
+        # if mask.is_contiguous() == False:
+        #     print("mask is not contiguous")
         return qkt, y, t1, t2, t3
     
     def forward_cached(self, x, qkt_cached, y_cached, restore_dim=True):
         B, T, H = x.size()
         K = self.n_head
 
-        # if restore_dim:
-        #     T += 1 
 
         qkt_cached = check_shape(qkt_cached, (B, K, T - 1, T - 1))
         y_cached = check_shape(y_cached, (B, K, T - 1, H // K))
         
-        with PytorchTimer(verbose=False) as T1:
-            # print(f"T: {T}")
-            # print(f"self.i: {self.i}")
-            q = self.q(x).view(B, T, K, H // K).transpose(1, 2)
-            k = self.k(x).view(B, T, K, H // K).transpose(1, 2)
-            v = self.v(x).view(B, T, K, H // K).transpose(1, 2)
+        # with PytorchTimer(verbose=False) as T1:
+        q = self.q(x).view(B, T, K, H // K).transpose(1, 2)
+        k = self.k(x).view(B, T, K, H // K).transpose(1, 2)
+        v = self.v(x).view(B, T, K, H // K).transpose(1, 2).contiguous()
 
-            qkt = torch.zeros(B, K, T, T, device=x.device)
-            qkt[:, :, :T-1, :T-1] = qkt_cached
-        t1 = T1.elapsed
+        qkt = torch.zeros(B, K, T, T, device=x.device)
+        qkt[:, :, :T-1, :T-1] = qkt_cached
+        # print(f"qkt_cached: {qkt.is_contiguous()}")
+        # t1 = T1.elapsed
 
         # qkt: BK1(H/K) * BK(H/K)T -> BK1T
-        with PytorchTimer(verbose=False) as T2:
-            qkt[:, :, -1:, :] = q[:, :, -1:, :] @ k.transpose(-2, -1)
-            attn = qkt * (1.0 / math.sqrt(k.size(-1)))
-        t2 = T2.elapsed
+        # with PytorchTimer(verbose=False) as T2:
+        qkt[:, :, -1:, :] = q[:, :, -1:, :] @ k.transpose(-2, -1)
+        qkt = qkt.contiguous()
+        attn = qkt * (1.0 / math.sqrt(k.size(-1)))
+        attn = attn.contiguous()
+        # t2 = T2.elapsed
         
-        mask = self.mask[:, :, :T, :T]
+        mask = self.mask[:, :, :T, :T].contiguous()
         attn = attn.masked_fill(mask == 0, float('-inf'))
         attn = F.softmax(attn, dim=-1)
-        attn = self.attn_drop(attn)
-        new_attn = attn[:, :, -1:, :]
-        with PytorchTimer(verbose=False) as T3:
-            # y_new: BK1T * BKT(H/K) -> BK1(H/K)
-            y_new = new_attn @ v
-            # y: stack(BK1(H/K), BK(T-1)(H/K)) -> BKT(H/K)
-            y = torch.cat((y_cached, y_new), dim=-2)
-        t3 = T3.elapsed
+        attn = self.attn_drop(attn).contiguous()
+        new_attn = attn[:, :, -1:, :].contiguous()
+        # with PytorchTimer(verbose=False) as T3:
+        # y_new: BK1T * BKT(H/K) -> BK1(H/K)
+        y_new = new_attn @ v
+        # y: stack(BK1(H/K), BK(T-1)(H/K)) -> BKT(H/K)
+        y = torch.cat((y_cached, y_new), dim=-2).contiguous()
+        # print(f"y_cached: {y.is_contiguous()}")
+        # t3 = T3.elapsed
 
-        # t1 = t2 = t3 = 0
+        t1 = t2 = t3 = 0
+        # self.check_if_contiguous([y, attn, v, mask, qkt])
+        # if v.is_contiguous() == False:
+        #     print("v is not contiguous")
         return qkt, y, t1, t2, t3
 
     def forward(self, x):
-        # print(self.cache.keys())
-
         B, T, H = x.size()
         K = self.n_head
         assert H == self.n_hidden
@@ -169,9 +179,9 @@ class CachedSelfAttn(CachedModule):
             self.set_cache("y", check_shape(y, (B, K, T, H // K)))
 
         y = y.transpose(1, 2).contiguous().view(B, T, H)
+        # self.check_if_contiguous([y, qkt])
         self.cache_counter += 1
         self.i += 1
-        # print(t1, t2, t3)
         return y, t1, t2, t3
 
 ### Helper function for Benchmark ###
@@ -179,13 +189,13 @@ def bench_cached(module, x, n_gen, is_profile=False):
     t1_array = []
     t2_array = []
     t3_array = []
-    # x = x.to(device)
     B, T, H = x.shape
     mem_usage = []
     module.clear_cache()
     module.reset_cache_counter()
     with torch.inference_mode():
         with PytorchTimer(verbose=False) as t:
+        # if True:
             if is_profile:
                 for _ in range(8):
                         x1 = x[:]
@@ -225,7 +235,9 @@ def bench_cached(module, x, n_gen, is_profile=False):
                     y_new = torch.randn((B, 1, H), device=device)
                     x = check_shape(torch.cat((y, y_new), dim=-2), (B, T + i, H))
                     mem_usage.append(torch.cuda.memory_allocated())
-    return t.elapsed, mem_usage, np.sum(t1_array), np.sum(t2_array), np.sum(t3_array)
+        t_bench = t.elapsed
+        # t_bench = 0
+    return t_bench, mem_usage, np.sum(t1_array), np.sum(t2_array), np.sum(t3_array)
 
 def pipeline(benchmark_function, module):
         t1_array = []
@@ -273,7 +285,7 @@ if __name__ == "__main__":
                 K = 4
                 B, H = hparam
                 for T in Ts:
-                    Tc = T // 2
+                    Tc = 32
                     Tg = T
                     layer0 = CachedSelfAttn(K, H, cache_length=0, B=B, T=Tc+Tg)
                     layer1 = CachedSelfAttn(K, H, cache_length=0.25 * Tg, B=B, T=Tc+Tg)
@@ -316,9 +328,10 @@ if __name__ == "__main__":
                     print(ret4 + [flops])
                     d[f"Tc={Tc} Tg={Tg} cache_length={Tg}"] = ret4 + [flops]
                     torch.cuda.empty_cache()
+                    print(f"Speedup for model_size={model_size} Tg={Tg}: {ret0[0] / ret4[0]}")
 
         print(d)
         df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(MB)", "mem_std(MB)", "t1_mean(s)", "t1_std(s)", "t2_mean(s)", "t2_std(s)","t3_mean(s)", "t3_std(s)", "flops"])
         print(df)
-        df.to_csv(f"logs/{today}-mem_selfattn_{model_size}_K={K}_test_nograd_AMP_todevice_optimized_t1t2t3_T=32_Ts*4.csv")
+        df.to_csv(f"logs/{today}-mem_selfattn_{model_size}_K={K}_test_nograd_AMP_todevice_optimized_noTimer_T=32_Ts*4_contiguous.csv")
     print(time.time() - start)
