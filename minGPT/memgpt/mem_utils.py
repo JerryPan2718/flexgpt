@@ -28,8 +28,8 @@ def sample(model, x, steps, temperature=1.0, sample=False, top_k=None):
     model.eval()
     for k in range(steps):
         # crop context if needed
-        x_cond = x if x.size(1) <= block_size else x[:, -block_size:]
-        # x_cond = x if x.size(1) <= block_size else x[:, :] # Use all previous tokens as Auto-regressive model
+        # x_cond = x if x.size(1) <= block_size else x[:, -block_size:]
+        x_cond = x if x.size(1) <= block_size else x[:, :] # Use all previous tokens as Auto-regressive model
         
         # print(f"sample x_cond.shape: {x_cond.shape}")
         logits, _ = model(x_cond)
@@ -48,7 +48,7 @@ def sample(model, x, steps, temperature=1.0, sample=False, top_k=None):
             _, ix = torch.topk(probs, k=1, dim=-1)
         # append to the sequence and continue
         x = torch.cat((x, ix), dim=1)
-        # print(x.shape)
+        print(x.shape)
         # print(x_cond.shape)
         # print(f"sample x.shape: {x.shape}")
 

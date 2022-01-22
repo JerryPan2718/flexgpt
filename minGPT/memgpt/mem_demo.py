@@ -23,6 +23,7 @@ import pandas as pd
 
 today = datetime.date.today()
 CUDA_VISIBLE_DEVICES = 1
+NUMEXPR_MAX_THREADS = 8
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 class CharDataset(Dataset):
@@ -115,12 +116,13 @@ def model_sampling(model, trainer, steps):
 
 if __name__ == "__main__":
     hparams = {"117M": (12, 768), "345M": (24, 1024), "762M": (36, 1280), "1542M": (48, 1600)}
-    cache_lengths = [0, 0.25, 0.5, 0.5, 1]
+    cache_lengths = [0, 1] # 0, 0.25, 0.5, 0.5, 1
     d = {}
-    Tgs = [256, 512, 1024]
+    Tgs = [1024] # 256, 512, 1024
     start = time.time()
+
     for model_size, hparam in hparams.items():
-        if model_size != "1542M":
+        if model_size != "117M":
             continue
         B, H = hparam
         K = 4
@@ -145,7 +147,7 @@ if __name__ == "__main__":
     print(d)
     df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)"])
     print(df)
-    df.to_csv(f"logs/{today}-mem_demo-{model_size}_K={K}.csv")
+    # df.to_csv(f"logs/{today}-mem_demo-{model_size}_K={K}.csv")
 print(time.time() - start)
 # completion = ''.join([train_dataset.itos[int(i)] for i in y])
 # print(completion)

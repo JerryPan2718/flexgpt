@@ -4,7 +4,7 @@ from mem_block import MemBlock
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from loguru import logger
+import logging
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -52,7 +52,7 @@ class MemGPT(nn.Module):
         self.apply(self._init_weights)
         self.B_idx = 0
 
-        logger.info("number of parameters: %e", sum(p.numel() for p in self.parameters()))
+        logging.info("number of parameters: %e", sum(p.numel() for p in self.parameters()))
 
     def get_block_size(self):
         return self.block_size
@@ -114,7 +114,7 @@ class MemGPT(nn.Module):
 
     def forward(self, idx, targets=None):
         b, t = idx.size()
-        assert t <= self.block_size, "Cannot forward, model block size is exhausted."
+        # assert t <= self.block_size, "Cannot forward, model block size is exhausted."
         
         if str(idx.device)[:4] != "cuda":
             print(f"idx.device: {idx.device}")
