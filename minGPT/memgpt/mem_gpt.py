@@ -14,12 +14,13 @@ class MemGPTConfig:
     resid_pdrop = 0.1
     attn_pdrop = 0.1
 
-    def __init__(self, vocab_size, block_size, B=12, K=12, H=768, **kwargs):
+    def __init__(self, vocab_size, block_size, B=12, K=12, H=768, T=2048, **kwargs):
         self.vocab_size = vocab_size
         self.block_size = block_size
         self.B = B
         self.K = K
         self.H = H
+        self.T = T
 
         for k,v in kwargs.items():
             setattr(self, k, v)
@@ -37,10 +38,12 @@ class MemGPT(nn.Module):
         super().__init__()
 
         self.config = config
+        self.T = self.config.T
 
         # input embedding stem
         self.tok_emb = nn.Embedding(self.config.vocab_size, self.config.H)
-        self.pos_emb = nn.Parameter(torch.zeros(1, self.config.B, self.config.H))
+        # self.pos_emb = nn.Parameter(torch.zeros(1, self.config.B, self.config.H))
+        self.pos_emb = nn.Parameter(torch.zeros(1, self.config.T, self.config.H))
         self.drop = nn.Dropout(self.config.embd_pdrop)
         # transformer
         self.blocks = nn.Sequential(*[MemBlock(self.config) for _ in range(self.config.B)])
@@ -121,15 +124,11 @@ class MemGPT(nn.Module):
         
         if targets != None:
             print(f"targets: {targets}")
-        # print(f"self.config.B: {self.config.B}")
-        # if self.B_idx == self.config.B:
-        #     print(f"reset mem_gpt.B_idx: {self.B_idx}")
-        #     self.B_idx = 0
-        # print(f"mem_gpt.B_idx: {self.B_idx}")
-
+       
         # forward the GPT model
         token_embeddings = self.tok_emb(idx) # each index maps to a (learnable) vector
         position_embeddings = self.pos_emb[:, :t, :] # each position maps to a (learnable) vector
+        # print(f"token_embeddings: {token_embeddings.shape}, position_embeddings: {position_embeddings.shape}")
         x = self.drop(token_embeddings + position_embeddings)
         # print(f"before blocks: {x.shape}")
         x = self.blocks(x)

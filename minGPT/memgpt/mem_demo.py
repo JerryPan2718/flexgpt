@@ -88,7 +88,7 @@ block_size = 2048 # spatial extent of the model for its context
 text = open('input.txt', 'r').read() # don't worry we won't run out of file handles
 train_dataset = CharDataset(text, block_size) # one line of poem is roughly 50 characters
 
-def model_init(B, K, H, cache_length):
+def model_init(B, K, H, cache_length, T):
     from mem_gpt import MemGPT, MemGPTConfig
     mem_config = MemGPTConfig(train_dataset.vocab_size, train_dataset.block_size,
         B=12, K=4, H=768, cache_length=0)
@@ -100,7 +100,7 @@ def model_init(B, K, H, cache_length):
     # initialize a trainer instance and kick off training
     tconf = MemTrainerConfig(max_epochs=1, batch_size=128, learning_rate=6e-4,
                         lr_decay=True, warmup_tokens=512*20, final_tokens=2*len(train_dataset)*block_size,
-                        num_workers=4)
+                        num_workers=4, T=T)
     trainer = MemTrainer(model, train_dataset, None, tconf)
     trainer.train()
     print("=" * 50)
@@ -120,6 +120,7 @@ if __name__ == "__main__":
     d = {}
     Tgs = [1024] # 256, 512, 1024
     start = time.time()
+    Tc = 32
 
     for model_size, hparam in hparams.items():
         if model_size != "117M":
@@ -130,7 +131,7 @@ if __name__ == "__main__":
             for cache_length in cache_lengths:
                 with torch.no_grad():
                     with torch.autocast(device):
-                        model, trainer = model_init(B, K, H, cache_length * Tg)
+                        model, trainer = model_init(B, K, H, cache_length * Tg, Tc + Tg)
                         print(f"Tg={Tg} model_size={model_size} cache_length={cache_length * Tg}")
                         # warmup
                         for _ in range(1):

@@ -48,7 +48,7 @@ def sample(model, x, steps, temperature=1.0, sample=False, top_k=None):
             _, ix = torch.topk(probs, k=1, dim=-1)
         # append to the sequence and continue
         x = torch.cat((x, ix), dim=1)
-        print(x.shape)
+        # print(x.shape)
         # print(x_cond.shape)
         # print(f"sample x.shape: {x.shape}")
 
