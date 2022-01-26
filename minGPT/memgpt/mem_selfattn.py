@@ -75,6 +75,7 @@ class CachedSelfAttn(CachedModule):
         self.cache_counter = 0
     
     def forward_uncached(self, x):
+        # print("uncached")
         B, T, H = x.size()
         K = self.n_head
         
@@ -105,14 +106,14 @@ class CachedSelfAttn(CachedModule):
         return qkt, y, t1, t2, t3
 
     def forward_cached(self, x, qkt_cached, y_cached, restore_dim=True):
-        B, T, H = x.size()
-        x_new = torch.randn((B, self.i, H), device=device)
-        x = torch.cat((x, x_new), dim=-2)
+        # print("cached")
         B, T, H = x.size()
         K = self.n_head
 
-        qkt_cached = check_shape(qkt_cached, (B, K, T - self.i, T - self.i))
-        y_cached = check_shape(y_cached, (B, K, T - self.i, H // K))
+        # T = T - 1
+
+        qkt_cached = check_shape(qkt_cached, (B, K, T-1, T-1))
+        y_cached = check_shape(y_cached, (B, K, T-1, H // K))
         
         with PytorchTimer(verbose=False) as T1:
             # print(f"self.i: {self.i}")
@@ -123,7 +124,7 @@ class CachedSelfAttn(CachedModule):
             qkt = torch.zeros(B, K, T, T, device=x.device)
             # print(f"qkt_cached: {qkt_cached.shape}")
             # print(f"qkt: {qkt[:, :, :T-self.i, :T-self.i].shape}, T: {T}")
-            qkt[:, :, :T-self.i, :T-self.i] = qkt_cached
+            qkt[:, :, :T-1, :T-1] = qkt_cached
         t1 = T1.elapsed
 
         # qkt: BK1(H/K) * BK(H/K)T -> BK1T
@@ -145,9 +146,10 @@ class CachedSelfAttn(CachedModule):
         t3 = T3.elapsed
 
         # t1 = t2 = t3 = 0
-        qkt = qkt[:, :, :-1 * self.i, :-1 * self.i]
-        y = y[:, :, :-1, :]
-        x = x[:, :-1 * self.i, :]
+        # qkt = qkt[:, :, :-1, :-1]
+        # y = y[:, :, :-1, :]
+        # x = x[:, :-1, :]
+
 
         return qkt, y, t1, t2, t3
 
@@ -161,7 +163,13 @@ class CachedSelfAttn(CachedModule):
 
         qkt_cached = self.get_cache("qkt", device=x.device)
         y_cached = self.get_cache("y", device=x.device)
-
+        
+        # print(y_cached is None)
+        # if y_cached is not None:
+        #     print(f"y_cached.shape: {y_cached.shape}")
+        # if qkt_cached is not None:
+        #     print(f"qkt_cached.shape: {qkt_cached.shape}")
+        # print(f"cache_counter: {self.cache_counter} cache_length: {self.cache_length}")
         if (y_cached is None or qkt_cached is None) or self.cache_counter >= self.cache_length:
             self.clear_cache()
             qkt, y, t1, t2, t3 = self.forward_uncached(x)
@@ -171,10 +179,9 @@ class CachedSelfAttn(CachedModule):
             qkt, y, t1, t2, t3 = self.forward_cached(x, qkt_cached, y_cached)
             self.set_cache("qkt", check_shape(qkt, (B, K, T, T)))
             self.set_cache("y", check_shape(y, (B, K, T, H // K)))
-
+        
         y = y.transpose(1, 2).contiguous().view(B, T, H)
         self.cache_counter += 1
-        self.i += 1
         # print(t1, t2, t3)
         return y, t1, t2, t3
 
@@ -286,7 +293,7 @@ if __name__ == "__main__":
                     layer4 = CachedSelfAttn(K, H, cache_length=Tg, B=B, T=Tc+Tg)
 
                     x = torch.randn((B, Tc, H), device=device)
-                    print(x.get_device())
+                    # print(x.get_device())
                     ret0 = pipeline(bench_cached, layer0)
                     flops = selfattn_flop(B=B, H=H, K=K, Tc=Tc, Tg=Tg, cache_length=0)
                     print(ret0 + [flops])

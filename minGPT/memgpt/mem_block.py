@@ -35,6 +35,7 @@ class MemBlock(nn.Module):
 
         if check_device_on_cuda(x) == False:
             print(f"mem_block.output.device: {x.device}")
+        # print(f"mem_block.cache: {[(key, val.shape) for key, val in self.attn.cache.items()]}")
         return x
 
 

@@ -91,7 +91,7 @@ train_dataset = CharDataset(text, block_size) # one line of poem is roughly 50 c
 def model_init(B, K, H, cache_length, T):
     from mem_gpt import MemGPT, MemGPTConfig
     mem_config = MemGPTConfig(train_dataset.vocab_size, train_dataset.block_size,
-        B=12, K=4, H=768, cache_length=0, device=device)
+        B=12, K=4, H=768, cache_length=cache_length, device=device)
     model = MemGPT(mem_config)
     print("=" * 50)
 
@@ -106,25 +106,29 @@ def model_init(B, K, H, cache_length, T):
     print("=" * 50)
     return model, trainer
 
-def model_sampling(model, trainer, steps):
+def model_sampling(model, trainer, steps, B):
     from mem_utils import sample
     context = "O God, O God!"
-    x = torch.tensor([train_dataset.stoi[s] for s in context], dtype=torch.long)[None,...].to(trainer.device)
-    # print(f"Tc: {x.shape[1]}")
+    # x = torch.tensor([train_dataset.stoi[s] for s in context], dtype=torch.long)[None,...].to(trainer.device)
+    x = torch.tensor([[train_dataset.stoi[s] for s in context] for _ in range(B)], dtype=torch.long)[None,...].to(trainer.device)
+    x = x[0]
+    # print(f"initial x: {x}")
+    print(f"initial x: {x.shape}")
     y, sampling_record = sample(model, x, steps, temperature=1.0, sample=True, top_k=10)
     return y, sampling_record
 
 if __name__ == "__main__":
     hparams = {"117M": (12, 768), "345M": (24, 1024), "762M": (36, 1280), "1542M": (48, 1600)}
-    cache_lengths = [0, 1] # 0, 0.25, 0.5, 0.5, 1
-    d = {}
-    Tgs = [1024] # 256, 512, 1024
+    cache_lengths = [0, 0.25, 0.5, 0.5, 1] # 0, 0.25, 0.5, 0.5, 1
+    
+    Tgs = [256, 512, 1024] # 256, 512, 1024
     start = time.time()
     Tc = 32
 
     for model_size, hparam in hparams.items():
-        if model_size != "117M":
-            continue
+        # if model_size != "117M":
+        #     continue
+        d = {}
         B, H = hparam
         K = 4
         for Tg in Tgs:
@@ -134,27 +138,31 @@ if __name__ == "__main__":
                         model, trainer = model_init(B, K, H, cache_length * Tg, Tc + Tg)
                         print(f"Tg={Tg} model_size={model_size} cache_length={cache_length * Tg}")
                         # warmup
-                        for _ in range(4):
-                            y, sampling_record = model_sampling(model, trainer, Tg)
+                        for i in range(4):
+                            print(f"warmup iteration: {i}")
+                            y, sampling_record = model_sampling(model, trainer, Tg, B)
                         
                         total_time = []
                         mem_usage = []
                         runtime = []
                         # timing module
-                        for _ in range(8):
+                        for i in range(8):
+                            print(f"timing iteration: {i}")
                             with PytorchTimer(verbose=False) as t:
-                                y, sampling_record = model_sampling(model, trainer, Tg)
+                                y, sampling_record = model_sampling(model, trainer, Tg, B)
                                 mem_usage.append(sampling_record[0])
                                 runtime.append(sampling_record[1])
                             total_time.append(t.elapsed)
-                        d[f"model_size={model_size} Tg={Tg} cache_length={cache_length * Tg}"] = [np.mean(total_time), np.std(total_time), np.mean(mem_usage), np.std(mem_usage), np.mean(runtime), np.std(runtime)]
+                        ret = [np.mean(total_time), np.std(total_time), np.mean(mem_usage), np.std(mem_usage), np.mean(runtime), np.std(runtime)]
+                        d[f"model_size={model_size} Tg={Tg} cache_length={cache_length * Tg}"] = ret
                         torch.cuda.empty_cache()
                         torch.cuda.empty_cache()
-
-    print(d)
-    df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(b)", "mem_std(b)", "t1_meam(ms)", "t1_std(ms)"])
-    print(df)
-    # df.to_csv(f"logs/{today}-mem_demo-{model_size}_K={K}.csv")
+            speedup = d[f"model_size={model_size} Tg={Tg} cache_length={0}"][0] / d[f"model_size={model_size} Tg={Tg} cache_length={Tg}"][0]
+            print(f"Speedup for {model_size} with Tg={Tg}: {speedup}")
+        print(d)
+        df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(b)", "mem_std(b)", "t1_meam(ms)", "t1_std(ms)"])
+        print(df)
+        df.to_csv(f"logs/{today}-mem_demo-{model_size}_K={K}.csv")
 print(time.time() - start)
 # completion = ''.join([train_dataset.itos[int(i)] for i in y])
 # print(completion)
