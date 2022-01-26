@@ -40,6 +40,7 @@ def sample(model, x, steps, temperature=1.0, sample=False, top_k=None):
         with PytorchTimer(verbose=False) as t:
             logits, _ = model(x_cond)
         runtime.append(t.elapsed)
+        print(t.elapsed)
         # pluck the logits at the final step and scale by temperature
         logits = logits[:, -1, :] / temperature
         # optionally crop probabilities to only the top k options
@@ -55,7 +56,7 @@ def sample(model, x, steps, temperature=1.0, sample=False, top_k=None):
             _, ix = torch.topk(probs, k=1, dim=-1)
         # append to the sequence and continue
         x = torch.cat((x, ix), dim=1)
-        # print(x.shape)
+        print(x.shape)
         # print(x_cond.shape)
         # print(f"sample x.shape: {x.shape}")
 

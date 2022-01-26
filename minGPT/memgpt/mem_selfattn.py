@@ -49,10 +49,10 @@ class CachedSelfAttn(CachedModule):
         self.register_buffer("mask", torch.tril(torch.ones(max_t, max_t, device=self.device)).view(1, 1, max_t, max_t))
         self.n_head = n_head
         self.n_hidden = n_hidden
-        # self.cache = {}
+        self.cache = {}
         self.cache_counter = 0
         self.cache_length = cache_length
-        self.i = 0
+        # self.i = 0
     
     def clear_cache(self):
         self.q.clear_cache()
@@ -79,73 +79,74 @@ class CachedSelfAttn(CachedModule):
         B, T, H = x.size()
         K = self.n_head
         
-        with PytorchTimer(verbose=False) as T1:
-            q = self.q(x).view(B, T, K, H // K).transpose(1, 2)
-            k = self.k(x).view(B, T, K, H // K).transpose(1, 2)
-            v = self.v(x).view(B, T, K, H // K).transpose(1, 2)
-        t1 = T1.elapsed
+        # with PytorchTimer(verbose=False) as T1:
+        q = self.q(x).view(B, T, K, H // K).transpose(1, 2)
+        k = self.k(x).view(B, T, K, H // K).transpose(1, 2)
+        v = self.v(x).view(B, T, K, H // K).transpose(1, 2)
+        # t1 = T1.elapsed
 
-        with PytorchTimer(verbose=False) as T2:
-            qkt = q @ k.transpose(-2, -1) 
-            attn = qkt * (1.0 / math.sqrt(k.size(-1)))
-        t2 = T2.elapsed
+        # with PytorchTimer(verbose=False) as T2:
+        qkt = q @ k.transpose(-2, -1) 
+        attn = qkt * (1.0 / math.sqrt(k.size(-1)))
+        # t2 = T2.elapsed
 
         
         mask = self.mask[:, :, :T, :T]
         attn = attn.masked_fill(mask == 0, float('-inf'))
         attn = F.softmax(attn, dim=-1)
         attn = self.attn_drop(attn)
-        with PytorchTimer(verbose=False) as T3:
-            y = attn @ v # (B, K, T, T) x (B, K, T, H/K) -> (B, K, T, T/K)
-        t3 = T3.elapsed
+        # with PytorchTimer(verbose=False) as T3:
+        y = attn @ v # (B, K, T, T) x (B, K, T, H/K) -> (B, K, T, T/K)
+        # t3 = T3.elapsed
 
-        # t1 = t2 = t3 = 0
+        t1 = t2 = t3 = 0
         if check_device_on_cuda(mask) == False:
             print(f"mask.device: {mask.device}")
 
         return qkt, y, t1, t2, t3
 
     def forward_cached(self, x, qkt_cached, y_cached, restore_dim=True):
-        # print("cached")
+        print("cached")
         B, T, H = x.size()
         K = self.n_head
-
-        # T = T - 1
 
         qkt_cached = check_shape(qkt_cached, (B, K, T-1, T-1))
         y_cached = check_shape(y_cached, (B, K, T-1, H // K))
         
-        with PytorchTimer(verbose=False) as T1:
-            # print(f"self.i: {self.i}")
-            q = self.q(x).view(B, T, K, H // K).transpose(1, 2)
-            k = self.k(x).view(B, T, K, H // K).transpose(1, 2)
-            v = self.v(x).view(B, T, K, H // K).transpose(1, 2)
+        # with PytorchTimer(verbose=False) as T1:
+        # print(f"self.i: {self.i}")
+        q = self.q(x).view(B, T, K, H // K).transpose(1, 2)
+        k = self.k(x).view(B, T, K, H // K).transpose(1, 2)
+        v = self.v(x).view(B, T, K, H // K).transpose(1, 2)
 
-            qkt = torch.zeros(B, K, T, T, device=x.device)
-            # print(f"qkt_cached: {qkt_cached.shape}")
-            # print(f"qkt: {qkt[:, :, :T-self.i, :T-self.i].shape}, T: {T}")
-            qkt[:, :, :T-1, :T-1] = qkt_cached
-        t1 = T1.elapsed
+        qkt = torch.zeros(B, K, T, T, device=x.device)
+        # print(f"qkt_cached: {qkt_cached.shape}")
+        # print(f"qkt: {qkt[:, :, :T-self.i, :T-self.i].shape}, T: {T}")
+        qkt[:, :, :T-1, :T-1] = qkt_cached
+        # t1 = T1.elapsed
 
         # qkt: BK1(H/K) * BK(H/K)T -> BK1T
         with PytorchTimer(verbose=False) as T2:
             qkt[:, :, -1:, :] = q[:, :, -1:, :] @ k.transpose(-2, -1)
             attn = qkt * (1.0 / math.sqrt(k.size(-1)))
         t2 = T2.elapsed
+        print(f"mem_selfattn qkt matmul: {t2}")
         
         mask = self.mask[:, :, :T, :T]
         attn = attn.masked_fill(mask == 0, float('-inf'))
         attn = F.softmax(attn, dim=-1)
         attn = self.attn_drop(attn)
         new_attn = attn[:, :, -1:, :]
+
         with PytorchTimer(verbose=False) as T3:
             # y_new: BK1T * BKT(H/K) -> BK1(H/K)
             y_new = new_attn @ v
             # y: stack(BK1(H/K), BK(T-1)(H/K)) -> BKT(H/K)
             y = torch.cat((y_cached, y_new), dim=-2)
         t3 = T3.elapsed
+        print(f"mem_selfattn y matmul and cat: {t3}")
 
-        # t1 = t2 = t3 = 0
+        t1 = t2 = t3 = 0
         # qkt = qkt[:, :, :-1, :-1]
         # y = y[:, :, :-1, :]
         # x = x[:, :-1, :]
