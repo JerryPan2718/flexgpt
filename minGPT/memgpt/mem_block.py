@@ -27,15 +27,6 @@ class MemBlock(nn.Module):
             print(f"mem_block.input.device: {x.device}")
         B, T, H = x.shape
 
-        # if self.B_idx == self.config.B:
-        #     print(f"mem_block.B_idx: {self.B_idx}")
-        #     self.attn.clear_cache()
-        #     self.attn.reset_cache_counter()
-        #     self.B_idx = 0
-        #     # y_new = torch.randn((B, 1, H), device=self.attn.device)
-        #     # x = check_shape(torch.cat((y, y_new), dim=-2), (B, T + 1, H))
-        # print(f"mem_block.B_idx: {self.B_idx}")
-        # print(f"before forward: {x.shape}")
         x = x + self.attn(self.ln1(x))[1]
         x = x + self.mlp(self.ln2(x))
 

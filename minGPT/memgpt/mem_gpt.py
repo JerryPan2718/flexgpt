@@ -14,13 +14,14 @@ class MemGPTConfig:
     resid_pdrop = 0.1
     attn_pdrop = 0.1
 
-    def __init__(self, vocab_size, block_size, B=12, K=12, H=768, T=2048, **kwargs):
+    def __init__(self, vocab_size, block_size, B=12, K=12, H=768, T=2048, device="cuda", **kwargs):
         self.vocab_size = vocab_size
         self.block_size = block_size
         self.B = B
         self.K = K
         self.H = H
         self.T = T
+        self.device = device
 
         for k,v in kwargs.items():
             setattr(self, k, v)
@@ -41,7 +42,7 @@ class MemGPT(nn.Module):
         self.T = self.config.T
 
         # input embedding stem
-        self.tok_emb = nn.Embedding(self.config.vocab_size, self.config.H)
+        self.tok_emb = nn.Embedding(self.config.vocab_size, self.config.H, device=config.device)
         # self.pos_emb = nn.Parameter(torch.zeros(1, self.config.B, self.config.H))
         self.pos_emb = nn.Parameter(torch.zeros(1, self.config.T, self.config.H))
         self.drop = nn.Dropout(self.config.embd_pdrop)

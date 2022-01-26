@@ -91,7 +91,7 @@ train_dataset = CharDataset(text, block_size) # one line of poem is roughly 50 c
 def model_init(B, K, H, cache_length, T):
     from mem_gpt import MemGPT, MemGPTConfig
     mem_config = MemGPTConfig(train_dataset.vocab_size, train_dataset.block_size,
-        B=12, K=4, H=768, cache_length=0)
+        B=12, K=4, H=768, cache_length=0, device=device)
     model = MemGPT(mem_config)
     print("=" * 50)
 
@@ -111,8 +111,8 @@ def model_sampling(model, trainer, steps):
     context = "O God, O God!"
     x = torch.tensor([train_dataset.stoi[s] for s in context], dtype=torch.long)[None,...].to(trainer.device)
     # print(f"Tc: {x.shape[1]}")
-    y = sample(model, x, steps, temperature=1.0, sample=True, top_k=10)[0]
-    return y
+    y, sampling_record = sample(model, x, steps, temperature=1.0, sample=True, top_k=10)
+    return y, sampling_record
 
 if __name__ == "__main__":
     hparams = {"117M": (12, 768), "345M": (24, 1024), "762M": (36, 1280), "1542M": (48, 1600)}
@@ -134,19 +134,25 @@ if __name__ == "__main__":
                         model, trainer = model_init(B, K, H, cache_length * Tg, Tc + Tg)
                         print(f"Tg={Tg} model_size={model_size} cache_length={cache_length * Tg}")
                         # warmup
-                        for _ in range(1):
-                            y = model_sampling(model, trainer, Tg)
+                        for _ in range(4):
+                            y, sampling_record = model_sampling(model, trainer, Tg)
                         
                         total_time = []
+                        mem_usage = []
+                        runtime = []
                         # timing module
-                        for _ in range(1):
+                        for _ in range(8):
                             with PytorchTimer(verbose=False) as t:
-                                y = model_sampling(model, trainer, Tg)
+                                y, sampling_record = model_sampling(model, trainer, Tg)
+                                mem_usage.append(sampling_record[0])
+                                runtime.append(sampling_record[1])
                             total_time.append(t.elapsed)
-                        d[f"model_size={model_size} Tg={Tg} cache_length={cache_length * Tg}"] = [np.mean(total_time), np.std(total_time)]
+                        d[f"model_size={model_size} Tg={Tg} cache_length={cache_length * Tg}"] = [np.mean(total_time), np.std(total_time), np.mean(mem_usage), np.std(mem_usage), np.mean(runtime), np.std(runtime)]
+                        torch.cuda.empty_cache()
+                        torch.cuda.empty_cache()
 
     print(d)
-    df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)"])
+    df = pd.DataFrame(data=d, index=["runtime_mean(ms)", "runtime_std(ms)", "mem_mean(b)", "mem_std(b)", "t1_meam(ms)", "t1_std(ms)"])
     print(df)
     # df.to_csv(f"logs/{today}-mem_demo-{model_size}_K={K}.csv")
 print(time.time() - start)

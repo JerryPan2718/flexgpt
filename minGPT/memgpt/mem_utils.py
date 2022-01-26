@@ -3,6 +3,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from utils import PytorchTimer
+
 
 def set_seed(seed):
     random.seed(seed)
@@ -26,13 +28,18 @@ def sample(model, x, steps, temperature=1.0, sample=False, top_k=None):
     """
     block_size = model.get_block_size()
     model.eval()
+
+    mem_usage = []
+    runtime = []
     for k in range(steps):
         # crop context if needed
         # x_cond = x if x.size(1) <= block_size else x[:, -block_size:]
         x_cond = x if x.size(1) <= block_size else x[:, :] # Use all previous tokens as Auto-regressive model
         
         # print(f"sample x_cond.shape: {x_cond.shape}")
-        logits, _ = model(x_cond)
+        with PytorchTimer(verbose=False) as t:
+            logits, _ = model(x_cond)
+        runtime.append(t.elapsed)
         # pluck the logits at the final step and scale by temperature
         logits = logits[:, -1, :] / temperature
         # optionally crop probabilities to only the top k options
@@ -52,4 +59,7 @@ def sample(model, x, steps, temperature=1.0, sample=False, top_k=None):
         # print(x_cond.shape)
         # print(f"sample x.shape: {x.shape}")
 
-    return x
+        mem_usage.append(torch.cuda.memory_allocated())
+
+
+    return x, (np.sum(mem_usage), np.sum(runtime))
