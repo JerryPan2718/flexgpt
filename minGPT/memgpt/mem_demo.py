@@ -19,6 +19,7 @@ from torch.utils.data import Dataset
 import time
 import datetime
 from torch.profiler import profile, record_function, ProfilerActivity
+import torch.autograd.profiler as profiler
 import pandas as pd
 
 today = datetime.date.today()
@@ -109,9 +110,9 @@ def model_init(B, K, H, cache_length, T):
 def model_sampling(model, trainer, steps, B):
     from mem_utils import sample
     context = "O God, O God!"
-    # x = torch.tensor([train_dataset.stoi[s] for s in context], dtype=torch.long)[None,...].to(trainer.device)
-    x = torch.tensor([[train_dataset.stoi[s] for s in context] for _ in range(B)], dtype=torch.long)[None,...].to(trainer.device)
-    x = x[0]
+    x = torch.tensor([train_dataset.stoi[s] for s in context], dtype=torch.long)[None,...].to(trainer.device)
+    # x = torch.tensor([[train_dataset.stoi[s] for s in context] for _ in range(B)], dtype=torch.long)[None,...].to(trainer.device)
+    # x = x[0]
     # print(f"initial x: {x}")
     print(f"initial x: {x.shape}")
     y, sampling_record = sample(model, x, steps, temperature=1.0, sample=True, top_k=10)
@@ -119,9 +120,9 @@ def model_sampling(model, trainer, steps, B):
 
 if __name__ == "__main__":
     hparams = {"117M": (12, 768), "345M": (24, 1024), "762M": (36, 1280), "1542M": (48, 1600)}
-    cache_lengths = [1, 0] # 0, 0.25, 0.5, 0.5, 1
+    cache_lengths = [0, 1] # 0, 0.25, 0.5, 0.5, 1
     
-    Tgs = [1024, 512, 256] # 256, 512, 1024
+    Tgs = [1024] # 256, 512, 1024
     start = time.time()
     Tc = 32
 
@@ -130,7 +131,7 @@ if __name__ == "__main__":
             continue
         d = {}
         B, H = hparam
-        K = 4
+        K = 1
         for Tg in Tgs:
             for cache_length in cache_lengths:
                 with torch.no_grad():
@@ -138,25 +139,28 @@ if __name__ == "__main__":
                         model, trainer = model_init(B, K, H, cache_length * Tg, Tc + Tg)
                         print(f"Tg={Tg} model_size={model_size} cache_length={cache_length * Tg}")
                         # warmup
-                        for i in range(4):
-                            print(f"warmup iteration: {i}")
-                            y, sampling_record = model_sampling(model, trainer, Tg, B)
-                        
-                        total_time = []
-                        mem_usage = []
-                        runtime = []
-                        # timing module
-                        for i in range(8):
-                            print(f"timing iteration: {i}")
-                            with PytorchTimer(verbose=False) as t:
+                        with profiler.profile(with_stack=True, profile_memory=True) as prof:
+                            for i in range(2):
+                                print(f"warmup iteration: {i}")
                                 y, sampling_record = model_sampling(model, trainer, Tg, B)
-                                mem_usage.append(sampling_record[0])
-                                runtime.append(sampling_record[1])
-                            total_time.append(t.elapsed)
-                        ret = [np.mean(total_time), np.std(total_time), np.mean(mem_usage), np.std(mem_usage), np.mean(runtime), np.std(runtime)]
-                        d[f"model_size={model_size} Tg={Tg} cache_length={cache_length * Tg}"] = ret
-                        torch.cuda.empty_cache()
-                        torch.cuda.empty_cache()
+                            
+                            total_time = []
+                            mem_usage = []
+                            runtime = []
+                            # timing module
+                            for i in range(2):
+                                print(f"timing iteration: {i}")
+                                with PytorchTimer(verbose=False) as t:
+                                    y, sampling_record = model_sampling(model, trainer, Tg, B)
+                                    mem_usage.append(sampling_record[0])
+                                    runtime.append(sampling_record[1])
+                                total_time.append(t.elapsed)
+                            ret = [np.mean(total_time), np.std(total_time), np.mean(mem_usage), np.std(mem_usage), np.mean(runtime), np.std(runtime)]
+                            d[f"model_size={model_size} Tg={Tg} cache_length={cache_length * Tg}"] = ret
+                            torch.cuda.empty_cache()
+                            torch.cuda.empty_cache()
+                        prof.export_chrome_trace(f"profiles/{today}-model_size={model_size}-cache_length={cache_length}-Tg={Tg}.json")
+
             speedup = d[f"model_size={model_size} Tg={Tg} cache_length={0}"][0] / d[f"model_size={model_size} Tg={Tg} cache_length={Tg}"][0]
             print(f"Speedup for {model_size} with Tg={Tg}: {speedup}")
         print(d)

@@ -1,4 +1,5 @@
 transformer-xl-benchmark/data/
+transformer-xl-benchmark/minGPT/memgpt/profiles/
 cuda_11.6.0_510.39.01_linux.run
 
 # Byte-compiled / optimized / DLL files

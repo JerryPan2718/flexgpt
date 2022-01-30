@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from utils import PytorchTimer
+import torch.autograd.profiler as profiler
 
 
 def set_seed(seed):
@@ -38,27 +39,30 @@ def sample(model, x, steps, temperature=1.0, sample=False, top_k=None):
         
         # print(f"sample x_cond.shape: {x_cond.shape}")
         with PytorchTimer(verbose=False) as t:
-            logits, _ = model(x_cond)
+            with torch.autograd.profiler.record_function("GPT Model Forward"):
+                logits, _ = model(x_cond)
         runtime.append(t.elapsed)
-        print(t.elapsed)
-        # pluck the logits at the final step and scale by temperature
-        logits = logits[:, -1, :] / temperature
-        # optionally crop probabilities to only the top k options
-        if top_k is not None:
-            logits = top_k_logits(logits, top_k)
-        # apply softmax to convert to probabilities
-        probs = F.softmax(logits, dim=-1)
-        # sample from the distribution or take the most likely
-        if sample:
-            ix = torch.multinomial(probs, num_samples=1)
-            # print(ix.shape)
-        else:
-            _, ix = torch.topk(probs, k=1, dim=-1)
-        # append to the sequence and continue
-        x = torch.cat((x, ix), dim=1)
-        print(x.shape)
+        print(f"mem_utils GPT forward pass: {t.elapsed}")
+        with PytorchTimer(verbose=False) as t:
+            # pluck the logits at the final step and scale by temperature
+            logits = logits[:, -1, :] / temperature
+            # optionally crop probabilities to only the top k options
+            if top_k is not None:
+                logits = top_k_logits(logits, top_k)
+            # apply softmax to convert to probabilities
+            probs = F.softmax(logits, dim=-1)
+            # sample from the distribution or take the most likely
+            if sample:
+                ix = torch.multinomial(probs, num_samples=1)
+                # print(ix.shape)
+            else:
+                _, ix = torch.topk(probs, k=1, dim=-1)
+            # append to the sequence and continue
+            x = torch.cat((x, ix), dim=1)
+            print(f"mem_utils: {x.shape}")
         # print(x_cond.shape)
         # print(f"sample x.shape: {x.shape}")
+        print(f"mem_utils rest: {t.elapsed}")
 
         mem_usage.append(torch.cuda.memory_allocated())
 

@@ -85,19 +85,21 @@ class CachedSelfAttn(CachedModule):
         v = self.v(x).view(B, T, K, H // K).transpose(1, 2)
         # t1 = T1.elapsed
 
-        # with PytorchTimer(verbose=False) as T2:
-        qkt = q @ k.transpose(-2, -1) 
-        attn = qkt * (1.0 / math.sqrt(k.size(-1)))
-        # t2 = T2.elapsed
-
+        with PytorchTimer(verbose=False) as T2:
+            qkt = q @ k.transpose(-2, -1) 
+            attn = qkt * (1.0 / math.sqrt(k.size(-1)))
+        t2 = T2.elapsed
+        # print(f"mem_selfattn qkt matmul: {t2}")
         
         mask = self.mask[:, :, :T, :T]
         attn = attn.masked_fill(mask == 0, float('-inf'))
         attn = F.softmax(attn, dim=-1)
         attn = self.attn_drop(attn)
-        # with PytorchTimer(verbose=False) as T3:
-        y = attn @ v # (B, K, T, T) x (B, K, T, H/K) -> (B, K, T, T/K)
-        # t3 = T3.elapsed
+        
+        with PytorchTimer(verbose=False) as T3:
+            y = attn @ v # (B, K, T, T) x (B, K, T, H/K) -> (B, K, T, T/K)
+        t3 = T3.elapsed
+        # print(f"mem_selfattn y matmul and cat: {t3}")
 
         t1 = t2 = t3 = 0
         if check_device_on_cuda(mask) == False:
@@ -106,7 +108,7 @@ class CachedSelfAttn(CachedModule):
         return qkt, y, t1, t2, t3
 
     def forward_cached(self, x, qkt_cached, y_cached, restore_dim=True):
-        print("cached")
+        # print("cached")
         B, T, H = x.size()
         K = self.n_head
 
@@ -130,7 +132,7 @@ class CachedSelfAttn(CachedModule):
             qkt[:, :, -1:, :] = q[:, :, -1:, :] @ k.transpose(-2, -1)
             attn = qkt * (1.0 / math.sqrt(k.size(-1)))
         t2 = T2.elapsed
-        print(f"mem_selfattn qkt matmul: {t2}")
+        # print(f"mem_selfattn qkt matmul: {t2}")
         
         mask = self.mask[:, :, :T, :T]
         attn = attn.masked_fill(mask == 0, float('-inf'))
@@ -141,10 +143,11 @@ class CachedSelfAttn(CachedModule):
         with PytorchTimer(verbose=False) as T3:
             # y_new: BK1T * BKT(H/K) -> BK1(H/K)
             y_new = new_attn @ v
+            # print(f"forward_cached: {new_attn.shape} {v.shape}")
             # y: stack(BK1(H/K), BK(T-1)(H/K)) -> BKT(H/K)
             y = torch.cat((y_cached, y_new), dim=-2)
         t3 = T3.elapsed
-        print(f"mem_selfattn y matmul and cat: {t3}")
+        # print(f"mem_selfattn y matmul and cat: {t3}")
 
         t1 = t2 = t3 = 0
         # qkt = qkt[:, :, :-1, :-1]
