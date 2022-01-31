@@ -32,6 +32,7 @@ def sample(model, x, steps, temperature=1.0, sample=False, top_k=None):
 
     mem_usage = []
     runtime = []
+    t_elapsed = []
     for k in range(steps):
         # crop context if needed
         # x_cond = x if x.size(1) <= block_size else x[:, -block_size:]
@@ -42,7 +43,7 @@ def sample(model, x, steps, temperature=1.0, sample=False, top_k=None):
             with torch.autograd.profiler.record_function("GPT Model Forward"):
                 logits, _ = model(x_cond)
         runtime.append(t.elapsed)
-        print(f"mem_utils GPT forward pass: {t.elapsed}")
+        # print(f"mem_utils GPT forward pass: {t.elapsed}")
         with PytorchTimer(verbose=False) as t:
             # pluck the logits at the final step and scale by temperature
             logits = logits[:, -1, :] / temperature
@@ -59,10 +60,14 @@ def sample(model, x, steps, temperature=1.0, sample=False, top_k=None):
                 _, ix = torch.topk(probs, k=1, dim=-1)
             # append to the sequence and continue
             x = torch.cat((x, ix), dim=1)
-            print(f"mem_utils: {x.shape}")
-        # print(x_cond.shape)
+            # print(f"mem_utils: {x.shape}")
+        print(f"mem_utils: {x_cond.shape}")
         # print(f"sample x.shape: {x.shape}")
-        print(f"mem_utils rest: {t.elapsed}")
+        # print(f"mem_utils rest: {t.elapsed}")
+        t_elapsed.append(t.elapsed)
+        if len(t_elapsed) > 30:
+            t_elapsed.pop(0)
+        print(f"t_elapsed last 30 entries:{np.mean(t_elapsed)}")
 
         mem_usage.append(torch.cuda.memory_allocated())
 

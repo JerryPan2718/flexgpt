@@ -120,9 +120,9 @@ def model_sampling(model, trainer, steps, B):
 
 if __name__ == "__main__":
     hparams = {"117M": (12, 768), "345M": (24, 1024), "762M": (36, 1280), "1542M": (48, 1600)}
-    cache_lengths = [0, 1] # 0, 0.25, 0.5, 0.5, 1
+    cache_lengths = [1, 0] # 0, 0.25, 0.5, 0.5, 1
     
-    Tgs = [1024] # 256, 512, 1024
+    Tgs = [512] # 256, 512, 1024
     start = time.time()
     Tc = 32
 
